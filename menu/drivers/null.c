@@ -1,5 +1,5 @@
 /*  RetroArch - A frontend for libretro.
- *  Copyright (C) 2011-2016 - Daniel De Matteis
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -21,7 +21,6 @@
 #include <stdio.h>
 
 #include "../menu_driver.h"
-#include "../menu_display.h"
 
 menu_ctx_driver_t menu_ctx_null = {
   NULL,  /* set_texture */
@@ -56,8 +55,13 @@ menu_ctx_driver_t menu_ctx_null = {
   NULL,  /* bind_init */
   NULL,  /* load_image */
   "null",
-  NULL,
-  NULL,
-  NULL, /* update_thumbnail_path */
-  NULL, /* update_thumbnail_image */
+  NULL,  /* environ */
+  NULL,  /* pointer_tap */
+  NULL,  /* update_thumbnail_path */
+  NULL,  /* update_thumbnail_image */
+  NULL,  /* set_thumbnail_system */
+  NULL,  /* set_thumbnail_content */
+  NULL,  /* osk_ptr_at_pos */
+  NULL,  /* update_savestate_thumbnail_path */
+  NULL,  /* update_savestate_thumbnail_image */
 };

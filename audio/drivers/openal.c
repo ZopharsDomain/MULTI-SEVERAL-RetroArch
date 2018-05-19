@@ -1,6 +1,7 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
- * 
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
+ *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
  *  ation, either version 3 of the License, or (at your option) any later version.
@@ -29,8 +30,10 @@
 #include <windows.h>
 #endif
 
+#include <retro_miscellaneous.h>
+#include <retro_timers.h>
+
 #include "../audio_driver.h"
-#include "../../configuration.h"
 #include "../../verbosity.h"
 
 #define BUFSIZE 1024
@@ -79,7 +82,9 @@ static void al_free(void *data)
    free(al);
 }
 
-static void *al_init(const char *device, unsigned rate, unsigned latency)
+static void *al_init(const char *device, unsigned rate, unsigned latency,
+      unsigned block_frames,
+      unsigned *new_rate)
 {
    al_t *al;
 
@@ -231,7 +236,7 @@ static void al_set_nonblock_state(void *data, bool state)
       al->nonblock = state;
 }
 
-static bool al_start(void *data)
+static bool al_start(void *data, bool is_shutdown)
 {
    al_t *al = (al_t*)data;
    if (al)

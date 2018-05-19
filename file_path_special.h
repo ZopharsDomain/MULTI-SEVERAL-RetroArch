@@ -1,7 +1,7 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
  *  Copyright (C) 2011-2016 - Daniel De Matteis
- * 
+ *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
  *  ation, either version 3 of the License, or (at your option) any later version.
@@ -21,6 +21,10 @@
 #include <stddef.h>
 
 #include <boolean.h>
+#include <retro_common_api.h>
+#include <retro_environment.h>
+
+RETRO_BEGIN_DECLS
 
 enum file_path_enum
 {
@@ -34,6 +38,7 @@ enum file_path_enum
    FILE_PATH_LOG_ERROR,
    FILE_PATH_LOG_INFO,
    FILE_PATH_CONTENT_HISTORY,
+   FILE_PATH_CONTENT_FAVORITES,
    FILE_PATH_CONTENT_MUSIC_HISTORY,
    FILE_PATH_CONTENT_VIDEO_HISTORY,
    FILE_PATH_CONTENT_IMAGE_HISTORY,
@@ -53,6 +58,7 @@ enum file_path_enum
    FILE_PATH_LAKKA_URL,
    FILE_PATH_CORE_THUMBNAILS_URL,
    FILE_PATH_INDEX_DIRS_URL,
+   FILE_PATH_NETPLAY_ROOM_LIST_URL,
    FILE_PATH_INDEX_URL,
    FILE_PATH_INDEX_EXTENDED_URL,
    FILE_PATH_CGP_EXTENSION,
@@ -79,6 +85,13 @@ enum file_path_enum
    FILE_PATH_AUTO_EXTENSION,
    FILE_PATH_ZIP_EXTENSION,
    FILE_PATH_7Z_EXTENSION,
+   FILE_PATH_OGG_EXTENSION,
+   FILE_PATH_MP3_EXTENSION,
+   FILE_PATH_FLAC_EXTENSION,
+   FILE_PATH_WAV_EXTENSION,
+   FILE_PATH_MOD_EXTENSION,
+   FILE_PATH_S3M_EXTENSION,
+   FILE_PATH_XM_EXTENSION,
    FILE_PATH_CONFIG_EXTENSION,
    FILE_PATH_CORE_INFO_EXTENSION
 };
@@ -97,13 +110,34 @@ enum application_special_type
    APPLICATION_SPECIAL_DIRECTORY_ASSETS_XMB_FONT,
    APPLICATION_SPECIAL_DIRECTORY_ASSETS_ZARCH,
    APPLICATION_SPECIAL_DIRECTORY_ASSETS_ZARCH_FONT,
-   APPLICATION_SPECIAL_DIRECTORY_ASSETS_ZARCH_ICONS
+   APPLICATION_SPECIAL_DIRECTORY_ASSETS_ZARCH_ICONS,
+   APPLICATION_SPECIAL_DIRECTORY_THUMBNAILS_CHEEVOS_BADGES
 };
+
+/**
+ * fill_short_pathname_representation:
+ * @out_rep            : output representation
+ * @in_path            : input path
+ * @size               : size of output representation
+ *
+ * Generates a short representation of path. It should only
+ * be used for displaying the result; the output representation is not
+ * binding in any meaningful way (for a normal path, this is the same as basename)
+ * In case of more complex URLs, this should cut everything except for
+ * the main image file.
+ *
+ * E.g.: "/path/to/game.img" -> game.img
+ *       "/path/to/myarchive.7z#folder/to/game.img" -> game.img
+ */
+void fill_short_pathname_representation_wrapper(char* out_rep,
+      const char *in_path, size_t size);
 
 const char *file_path_str(enum file_path_enum enum_idx);
 
 bool fill_pathname_application_data(char *s, size_t len);
 
 void fill_pathname_application_special(char *s, size_t len, enum application_special_type type);
+
+RETRO_END_DECLS
 
 #endif

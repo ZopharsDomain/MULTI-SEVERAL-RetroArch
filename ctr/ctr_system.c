@@ -1,5 +1,6 @@
 #include <3ds.h>
 #include <sys/iosupport.h>
+#include <3ds/services/apt.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
@@ -77,7 +78,10 @@ void __system_allocateHeaps(void)
 void __attribute__((weak)) __libctru_init(void (*retAddr)(void))
 {
    /* Store the return address */
-   __system_retAddr = envIsHomebrew() ? retAddr : NULL;
+   __system_retAddr = NULL;
+   if (envIsHomebrew()) {
+      __system_retAddr = retAddr;
+   }
 
    /* Initialize the synchronization subsystem */
    __sync_init();

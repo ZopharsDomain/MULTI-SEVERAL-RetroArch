@@ -1,7 +1,7 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
- *  Copyright (C) 2011-2016 - Daniel De Matteis
- * 
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
+ *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
  *  ation, either version 3 of the License, or (at your option) any later version.
@@ -17,9 +17,9 @@
 #define ALSA_PCM_NEW_HW_PARAMS_API
 #define ALSA_PCM_NEW_SW_PARAMS_API
 #include <sys/asoundlib.h>
+#include <retro_math.h>
 
 #include "../audio_driver.h"
-#include "../../configuration.h"
 
 #define MAX_FRAG_SIZE 3072
 #define DEFAULT_RATE 48000
@@ -46,13 +46,13 @@ typedef struct alsa
 typedef long snd_pcm_sframes_t;
 
 static void *alsa_qsa_init(const char *device,
-      unsigned rate, unsigned latency)
+      unsigned rate, unsigned latency, unsigned block_frames,
+      unsigned *new_rate)
 {
    int err, card, dev, i;
    snd_pcm_channel_info_t pi;
    snd_pcm_channel_params_t params = {0};
    snd_pcm_channel_setup_t setup   = {0};
-   settings_t *settings            = config_get_ptr();
    alsa_t *alsa                    = (alsa_t*)calloc(1, sizeof(alsa_t));
    if (!alsa)
       return NULL;
@@ -122,8 +122,8 @@ static void *alsa_qsa_init(const char *device,
       goto error;
    }
 
-   if (settings->audio.block_frames)
-      alsa->buf_size = settings->audio.block_frames * 4;
+   if (block_frames)
+      alsa->buf_size = block_frames * 4;
    else
       alsa->buf_size = next_pow2(32 * latency);
 
@@ -231,7 +231,7 @@ static ssize_t alsa_qsa_write(void *data, const void *buf, size_t size)
 
       if (avail_write)
       {
-         memcpy(alsa->buffer[alsa->buffer_index] + 
+         memcpy(alsa->buffer[alsa->buffer_index] +
                alsa->buffer_ptr, buf, avail_write);
 
          alsa->buffer_ptr      += avail_write;
@@ -291,7 +291,7 @@ static bool alsa_qsa_alive(void *data)
    return false;
 }
 
-static bool alsa_qsa_start(void *data)
+static bool alsa_qsa_start(void *data, bool is_shutdown)
 {
    alsa_t *alsa = (alsa_t*)data;
 
@@ -355,8 +355,8 @@ static void alsa_qsa_free(void *data)
 static size_t alsa_qsa_write_avail(void *data)
 {
    alsa_t *alsa = (alsa_t*)data;
-   size_t avail = (alsa->buf_count - 
-         (int)alsa->buffered_blocks - 1) * alsa->buf_size + 
+   size_t avail = (alsa->buf_count -
+         (int)alsa->buffered_blocks - 1) * alsa->buf_size +
       (alsa->buf_size - (int)alsa->buffer_ptr);
    return avail;
 }
@@ -364,7 +364,7 @@ static size_t alsa_qsa_write_avail(void *data)
 static size_t alsa_qsa_buffer_size(void *data)
 {
    alsa_t *alsa = (alsa_t*)data;
-   return alsa->buf_size * alsa->buf_count; 
+   return alsa->buf_size * alsa->buf_count;
 }
 
 audio_driver_t audio_alsa = {

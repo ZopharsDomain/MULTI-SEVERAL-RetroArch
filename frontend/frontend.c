@@ -1,6 +1,6 @@
 /* RetroArch - A frontend for libretro.
  * Copyright (C) 2010-2014 - Hans-Kristian Arntzen
- * Copyright (C) 2011-2016 - Daniel De Matteis
+ * Copyright (C) 2011-2017 - Daniel De Matteis
  * Copyright (C) 2012-2015 - Michael Lelli
  *
  * RetroArch is free software: you can redistribute it and/or modify it under the terms
@@ -22,6 +22,8 @@
 #include "../config.h"
 #endif
 
+#include <retro_timers.h>
+
 #ifdef HAVE_MENU
 #include "../menu/menu_driver.h"
 #endif
@@ -34,7 +36,17 @@
 #include "../driver.h"
 #include "../paths.h"
 #include "../retroarch.h"
-#include "../runloop.h"
+
+/* griffin hack */
+#ifdef HAVE_QT
+#ifndef HAVE_MAIN
+#define HAVE_MAIN
+#endif
+#endif
+
+#ifndef HAVE_MAIN
+#include "../retroarch.h"
+#endif
 
 /**
  * main_exit:
@@ -48,7 +60,7 @@ void main_exit(void *args)
 {
    settings_t *settings = config_get_ptr();
 
-   if (settings->config_save_on_exit)
+   if (settings->bools.config_save_on_exit)
       command_event(CMD_EVENT_MENU_SAVE_CURRENT_CONFIG, NULL);
 
 #ifdef HAVE_MENU
@@ -93,11 +105,14 @@ void main_exit(void *args)
 int rarch_main(int argc, char *argv[], void *data)
 {
    void *args                      = (void*)data;
+#if defined(HAVE_MAIN) && defined(HAVE_QT)
+   const ui_application_t *ui_application = NULL;
+#endif
 
    rarch_ctl(RARCH_CTL_PREINIT, NULL);
    frontend_driver_init_first(args);
    rarch_ctl(RARCH_CTL_INIT, NULL);
-   
+
    if (frontend_driver_is_inited())
    {
       content_ctx_info_t info;
@@ -107,20 +122,19 @@ int rarch_main(int argc, char *argv[], void *data)
       info.args            = args;
       info.environ_get     = frontend_driver_environment_get_ptr();
 
-      if (!task_push_content_load_default(
+      if (!task_push_load_content_from_cli(
                NULL,
                NULL,
                &info,
                CORE_TYPE_PLAIN,
-               CONTENT_MODE_LOAD_FROM_CLI,
                NULL,
                NULL))
-         return 0;
+         return 1;
    }
 
    ui_companion_driver_init_first();
 
-#ifndef HAVE_MAIN
+#if !defined(HAVE_MAIN)
    do
    {
       unsigned sleep_ms = 0;
@@ -128,18 +142,28 @@ int rarch_main(int argc, char *argv[], void *data)
 
       if (ret == 1 && sleep_ms > 0)
          retro_sleep(sleep_ms);
-      task_queue_ctl(TASK_QUEUE_CTL_CHECK, NULL);
+
+      task_queue_check();
+
       if (ret == -1)
          break;
    }while(1);
 
    main_exit(args);
+#elif defined(HAVE_QT)
+   ui_application = ui_companion_driver_get_qt_application_ptr();
+
+   if (ui_application && ui_application->run)
+      ui_application->run(args);
 #endif
 
    return 0;
 }
 
 #ifndef HAVE_MAIN
+#ifdef __cplusplus
+extern "C"
+#endif
 int main(int argc, char *argv[])
 {
    return rarch_main(argc, argv, NULL);

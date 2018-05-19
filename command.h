@@ -2,7 +2,7 @@
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
  *  Copyright (C) 2011-2016 - Daniel De Matteis
  *  Copyright (C) 2016 - Brad Parker
- * 
+ *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
  *  ation, either version 3 of the License, or (at your option) any later version.
@@ -60,6 +60,8 @@ enum event_command
    CMD_EVENT_TAKE_SCREENSHOT,
    /* Quits RetroArch. */
    CMD_EVENT_QUIT,
+   /* Reinitialize all drivers. */
+   CMD_EVENT_REINIT_FROM_TOGGLE,
    /* Reinitialize all drivers. */
    CMD_EVENT_REINIT,
    /* Toggles cheevos hardcore mode. */
@@ -134,6 +136,10 @@ enum event_command
    CMD_EVENT_REBOOT,
    /* Resume RetroArch when in menu. */
    CMD_EVENT_RESUME,
+   /* Add a playlist entry to favorites. */
+   CMD_EVENT_ADD_TO_FAVORITES,
+   /* Reset playlist entry associated core to DETECT */
+   CMD_EVENT_RESET_CORE_ASSOCIATION,
    /* Toggles pause. */
    CMD_EVENT_PAUSE_TOGGLE,
    /* Pauses RetroArch. */
@@ -143,6 +149,7 @@ enum event_command
    CMD_EVENT_PAUSE_CHECKS,
    CMD_EVENT_MENU_SAVE_CURRENT_CONFIG,
    CMD_EVENT_MENU_SAVE_CURRENT_CONFIG_OVERRIDE_CORE,
+   CMD_EVENT_MENU_SAVE_CURRENT_CONFIG_OVERRIDE_CONTENT_DIR,
    CMD_EVENT_MENU_SAVE_CURRENT_CONFIG_OVERRIDE_GAME,
    CMD_EVENT_MENU_SAVE_CONFIG,
    CMD_EVENT_MENU_PAUSE_LIBRETRO,
@@ -167,12 +174,16 @@ enum event_command
    CMD_EVENT_NETWORK_DEINIT,
    /* Initializes network system. */
    CMD_EVENT_NETWORK_INIT,
-   /* Initializes netplay system. */
+   /* Initializes netplay system with a string or no host specified. */
    CMD_EVENT_NETPLAY_INIT,
+   /* Initializes netplay system with a direct host specified. */
+   CMD_EVENT_NETPLAY_INIT_DIRECT,
+   /* Initializes netplay system with a direct host specified after loading content. */
+   CMD_EVENT_NETPLAY_INIT_DIRECT_DEFERRED,
    /* Deinitializes netplay system. */
    CMD_EVENT_NETPLAY_DEINIT,
-   /* Flip netplay players. */
-   CMD_EVENT_NETPLAY_FLIP_PLAYERS,
+   /* Switch between netplay gaming and watching. */
+   CMD_EVENT_NETPLAY_GAME_WATCH,
    /* Initializes BSV movie. */
    CMD_EVENT_BSV_MOVIE_INIT,
    /* Deinitializes BSV movie. */
@@ -185,12 +196,14 @@ enum event_command
    CMD_EVENT_REMOTE_INIT,
    /* Deinitializes remote gamepad interface. */
    CMD_EVENT_REMOTE_DEINIT,
+   /* Initializes keyboard to gamepad mapper interface. */
+   CMD_EVENT_MAPPER_INIT,
+   /* Deinitializes keyboard to gamepad mapper interface. */
+   CMD_EVENT_MAPPER_DEINIT,
    /* Reinitializes audio driver. */
    CMD_EVENT_AUDIO_REINIT,
    /* Resizes windowed scale. Will reinitialize video driver. */
    CMD_EVENT_RESIZE_WINDOWED_SCALE,
-   /* Deinitializes temporary content. */
-   CMD_EVENT_TEMPORARY_CONTENT_DEINIT,
    CMD_EVENT_LOG_FILE_DEINIT,
    /* Toggles disk eject. */
    CMD_EVENT_DISK_EJECT_TOGGLE,
@@ -204,20 +217,26 @@ enum event_command
    CMD_EVENT_RUMBLE_STOP,
    /* Toggles mouse grab. */
    CMD_EVENT_GRAB_MOUSE_TOGGLE,
+   /* Toggles game focus. */
+   CMD_EVENT_GAME_FOCUS_TOGGLE,
+   /* Toggles desktop menu. */
+   CMD_EVENT_UI_COMPANION_TOGGLE,
    /* Toggles fullscreen mode. */
    CMD_EVENT_FULLSCREEN_TOGGLE,
    CMD_EVENT_PERFCNT_REPORT_FRONTEND_LOG,
    CMD_EVENT_VOLUME_UP,
    CMD_EVENT_VOLUME_DOWN,
+   CMD_EVENT_MIXER_VOLUME_UP,
+   CMD_EVENT_MIXER_VOLUME_DOWN,
    CMD_EVENT_DISABLE_OVERRIDES,
-   CMD_EVENT_RESTORE_DEFAULT_SHADER_PRESET
+   CMD_EVENT_RESTORE_REMAPS,
+   CMD_EVENT_RESTORE_DEFAULT_SHADER_PRESET,
+   CMD_EVENT_LIBUI_TEST
 };
 
-#ifdef HAVE_COMMAND
-#if defined(HAVE_NETWORKING) && defined(HAVE_NETWORK_CMD)
+bool command_set_shader(const char *arg);
+
 bool command_network_send(const char *cmd_);
-#endif
-#endif
 
 bool command_network_new(
       command_t *handle,
@@ -225,7 +244,7 @@ bool command_network_new(
       bool network_enable,
       uint16_t port);
 
-command_t *command_new(bool local_enable);
+command_t *command_new(void);
 
 bool command_poll(command_t *handle);
 
@@ -244,6 +263,23 @@ bool command_free(command_t *handle);
  * Returns: true (1) on success, otherwise false (0).
  **/
 bool command_event(enum event_command action, void *data);
+
+void command_playlist_push_write(
+      void *data,
+      const char *path,
+      const char *label,
+      const char *core_path,
+      const char *core_name);
+
+void command_playlist_update_write(
+      void *data,
+      size_t idx,
+      const char *path,
+      const char *label,
+      const char *core_path,
+      const char *core_display_name,
+      const char *crc32,
+      const char *db_name);
 
 RETRO_END_DECLS
 

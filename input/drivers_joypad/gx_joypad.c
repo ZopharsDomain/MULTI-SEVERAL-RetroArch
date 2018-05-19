@@ -1,6 +1,6 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
- *  Copyright (C) 2011-2016 - Daniel De Matteis
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
  *  Copyright (C) 2012-2015 - Michael Lelli
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
@@ -15,14 +15,13 @@
  *  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "../../configuration.h"
-#include "../input_autodetect.h"
-
 #include <gccore.h>
 #include <ogc/pad.h>
 #ifdef HW_RVL
 #include <wiiuse/wpad.h>
 #endif
+
+#include "../../tasks/tasks_internal.h"
 
 #ifdef GEKKO
 #define WPADInit WPAD_Init
@@ -144,21 +143,15 @@ static void handle_hotplug(unsigned port, uint32_t ptype)
 
    if (ptype != WPAD_EXP_NOCONTROLLER)
    {
-      autoconfig_params_t params = {{0}};
-      settings_t *settings       = config_get_ptr();
-
-      if (!settings->input.autodetect_enable)
-         return;
-
-      strlcpy(settings->input.device_names[port],
+      if (!input_autoconfigure_connect(
             gx_joypad_name(port),
-            sizeof(settings->input.device_names[port]));
-
-      /* TODO - implement VID/PID? */
-      params.idx = port;
-      strlcpy(params.name, gx_joypad_name(port), sizeof(params.name));
-      strlcpy(params.driver, gx_joypad.ident, sizeof(params.driver));
-      input_config_autoconfigure_joypad(&params);
+            NULL,
+            gx_joypad.ident,
+            port,
+            0,
+            0
+            ))
+         input_config_set_device_name(port, gx_joypad_name(port));
    }
 }
 
@@ -169,9 +162,14 @@ static bool gx_joypad_button(unsigned port, uint16_t key)
    return (pad_state[port] & (UINT64_C(1) << key));
 }
 
-static uint64_t gx_joypad_get_buttons(unsigned port)
+static void gx_joypad_get_buttons(unsigned port, input_bits_t *state)
 {
-   return pad_state[port];
+	if (port < MAX_PADS)
+   {
+		BITS_COPY16_PTR( state, pad_state[port] );
+	}
+   else
+		BIT256_CLEAR_ALL_PTR(state);
 }
 
 static int16_t gx_joypad_axis(unsigned port, uint32_t joyaxis)
@@ -330,7 +328,8 @@ static void gx_joypad_poll(void)
 #ifdef HW_RVL
    if (g_quit)
    {
-      runloop_ctl(RUNLOOP_CTL_SET_SHUTDOWN, NULL);
+      rarch_ctl(RARCH_CTL_SET_SHUTDOWN, NULL);
+      g_quit = false;
       return;
    }
 
@@ -503,13 +502,17 @@ static bool gx_joypad_query_pad(unsigned pad)
 static void gx_joypad_destroy(void)
 {
 #ifdef HW_RVL
+#if 0
    int i;
    for (i = 0; i < MAX_PADS; i++)
    {
-   // Commenting this out fixes the Wii remote not reconnecting after core load, exit, etc.
-   //   WPAD_Flush(i);
-   //   WPADDisconnect(i);
+      /* Commenting this out fixes the Wii
+       * remote not reconnecting after
+       * core load, exit, etc. */
+      WPAD_Flush(i);
+      WPADDisconnect(i);
    }
+#endif
 #endif
 }
 

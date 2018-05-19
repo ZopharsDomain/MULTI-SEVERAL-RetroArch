@@ -1,21 +1,24 @@
 [![Build Status](https://travis-ci.org/libretro/RetroArch.svg?branch=master)](https://travis-ci.org/libretro/RetroArch)
-<a href="https://scan.coverity.com/projects/retroarch">
-  <img alt="Coverity Scan Build Status"
-       src="https://scan.coverity.com/projects/8936/badge.svg"/>
-</a>
+[![Coverity Scan Build Status](https://scan.coverity.com/projects/8936/badge.svg)](https://scan.coverity.com/projects/retroarch)
 
 # RetroArch
 
 RetroArch is the reference frontend for the libretro API.
-Popular examples of implementations for this API includes videogame system emulators and game engines, but also
+Popular examples of implementations for this API includes video game system emulators and game engines as well as
 more generalized 3D programs.
 These programs are instantiated as dynamic libraries. We refer to these as "libretro cores".
+
+![XMB menu driver](http://i.imgur.com/BMR1xxr.png "XMB menu driver")
+
+![rgui menu driver](http://i.imgur.com/X3CbBKa.png "rgui menu driver")
+
+![glui menu driver](http://i.imgur.com/ooqv8rw.png "glui menu driver")
 
 ## libretro
 
 [libretro](http://libretro.com) is an API that exposes generic audio/video/input callbacks.
 A frontend for libretro (such as RetroArch) handles video output, audio output, input and application lifecycle.
-A libretro core written in portable C or C++ can run seamlessly on many platforms with very little/no porting effort.
+A libretro core written in portable C or C++ can run seamlessly on many platforms with very little to no porting effort.
 
 While RetroArch is the reference frontend for libretro, several other projects have used the libretro
 interface to include support for emulators and/or game engines. libretro is completely open and free for anyone to use.
@@ -24,26 +27,29 @@ interface to include support for emulators and/or game engines. libretro is comp
 
 ## Binaries
 
-Latest Windows binaries are currently hosted on the buildbot -(http://buildbot.libretro.com/).
+Latest Windows binaries are currently hosted on the [buildbot](http://buildbot.libretro.com/).
 
 ## Support
 
-To reach developers, either make an issue here on Github, make a thread on the [forum](http://www.libretro.com/forums/),
+To reach developers, either make an issue here on GitHub, make a thread on the [forum](http://www.libretro.com/forums/),
 or visit our IRC channel: #retroarch @ irc.freenode.org.
 
 ## Documentation
 
-See our [wiki](https://github.com/libretro/RetroArch/wiki). On Unix, man-pages are provided.
+See our [Documentation Center](https://docs.libretro.com/). On Unix, man-pages are provided.
 More developer-centric stuff is found [here](https://github.com/libretro/libretro.github.com/wiki/Documentation-devs).
 
 ## Related projects
 
    - Cg/HLSL shaders: [common-shaders](https://github.com/libretro/common-shaders)
+   - slang shaders: [slang-shaders](https://github.com/libretro/slang-shaders)
+   - GLSL shaders: [glsl-shaders](https://github.com/libretro/glsl-shaders)
    - Helper scripts to build libretro implementations: [libretro-super](https://github.com/libretro/libretro-super)
+   - GitHub mirrors of projects, useful for generating diff files: [libretro-mirrors](https://github.com/libretro-mirrors/)
 
 ## Philosophy
 
-RetroArch attempts to be small and lean,
+RetroArch attempts to be small and lean
 while still having all the useful core features expected from an emulator.
 It is designed to be very portable and features a gamepad-centric UI.
 It also has a full-featured command-line interface.
@@ -55,13 +61,27 @@ RetroArch also emphasizes on being easy to integrate into various launcher front
 
 ## Platforms
 
-RetroArch has been ported to the following platforms outside PC:
+RetroArch has been ported to the following platforms:
 
-   - PlayStation3
-   - Xbox 360 (Libxenon/XeXDK)
-   - Xbox 1
-   - Wii, Gamecube (Libogc)
+   - DOS
+   - Windows
+   - Linux
+   - Emscripten
+   - FreeBSD
+   - NetBSD
+   - OpenBSD
+   - Haiku
+   - Solaris
+   - MacOS X
+   - PlayStation 3
+   - PlayStation Portable
+   - PlayStation Vita
+   - Original Microsoft Xbox
+   - Microsoft Xbox 360 (Libxenon/XeXDK)
+   - Nintendo Wii, GameCube (Libogc)
+   - Nintendo Wii U
    - Nintendo 3DS
+   - Nintendo Switch
    - Raspberry Pi
    - Android
    - iOS
@@ -101,7 +121,7 @@ RetroArch needs at least one of these audio driver libraries:
    - DirectSound (Win32, Xbox 1)
    - CoreAudio (OSX, iOS)
 
-To run properly, RetroArch requires a libretro implementation present, however, as it's typically loaded
+To run properly, RetroArch requires a libretro implementation present; however, as it's typically loaded
 dynamically, it's not required at build time.
 
 ## Dependencies (Console ports, mobile)
@@ -111,102 +131,128 @@ anything other than what the respective SDKs provide.
 
 ## Configuring
 
-The default configuration is defined in config.def.h.
+The default configuration is defined in `config.def.h`.
 It is not recommended to change this unless you know what you're doing.
 These can later be tweaked by using a config file.
-A sample configuration file is installed to /etc/retroarch.cfg. This is the system-wide config file.
+A sample configuration file is installed to `/etc/retroarch.cfg`. This is the system-wide config file.
 
-RetroArch will on startup create a config file in $XDG\_CONFIG\_HOME/retroarch/retroarch.cfg if doesn't exist.
+RetroArch will on startup create a config file in `$XDG\_CONFIG\_HOME/retroarch/retroarch.cfg` if it does not exist.
 Users only need to configure a certain option if the desired value deviates from the value defined in config.def.h.
 
-To configure joypads, use the built-in menu or the <tt>retroarch-joyconfig</tt> command-line tool.
+To configure joypads, use the built-in menu or the `retroarch-joyconfig` command-line tool.
 
 ## Compiling and installing
-<b>Linux</b><br/>
-- Prerequisites:
-```bash
-sudo apt-get install -y make git-core curl g++ pkg-config libglu1-mesa-dev freeglut3-dev mesa-common-dev libsdl1.2-dev libsdl-image1.2-dev libsdl-mixer1.2-dev libsdl-ttf2.0-dev
-```
-- Compiling:
-```bash
-./configure
-make
-```
 
-<b>Mac</b><br/>
-- Prerequisites: [XCode](https://www.google.com/url?sa=t&rct=j&q=&esrc=s&source=web&cd=1&cad=rja&uact=8&ved=0CB4QFjAA&url=https%3A%2F%2Fitunes.apple.com%2Fus%2Fapp%2Fxcode%2Fid497799835%3Fmt%3D12&ei=ZmfeVNPtIILVoASBnoCYBw&usg=AFQjCNGrxKmVtXUdvUU3MhqZhP4MHT6Gtg&sig2=RIXKsWQ79YTQBt_lK5fdKA&bvm=bv.85970519,d.cGU), [Cg](https://developer.nvidia.com/cg-toolkit-download).
-- You can open the project (**pkg/apple/RetroArch.xcodeproj**) in the Xcode IDE and build (**&#8984;-B**) and run (**&#8984;-R**) it there. Or you can use the command line...
-- Debug:
-```bash
-# Build
-xcodebuild -target RetroArch -configuration Debug -project pkg/apple/RetroArch.xcodeproj
-# Run
-open ./pkg/apple/build/Debug/RetroArch.app/
-```
-- Release:
-```bash
-# Build
-xcodebuild -target RetroArch -configuration Release -project pkg/apple/RetroArch.xcodeproj
-# Run
-open ./pkg/apple/build/Release/RetroArch.app/
-```
+Instructions for compiling and installing RetroArch can be found in the [Libretro/RetroArch Documentation Center](https://docs.libretro.com/).
 
-<b>PC</b><br/>
-Instructions for compiling on PC can be found in the [wiki](https://github.com/Themaister/RetroArch/wiki).
+## CRT 15Khz Resolution Switching
 
-<b>PlayStation3</b><br/>
+CRT Switch res will turn on, on the fly. However, you will need to restart retroarch to disable it. With CRT SwitchRes enable Retroarch will start in 2560 x 480 @ 60.  
 
-RetroArch PS3 needs to be compiled in the following order:
+If you are running windows, before enabling the CRT SwitchRes options please make sure you have installed CRTEmudriver and installed some modelines. The minimum modelins for all games to switch correctly are:
 
-1) Compile RetroArch Salamander
+- 2560 x 192 @ 60.000000
+- 2560 x 200 @ 60.000000
+- 2560 x 240 @ 60.000000
+- 2560 x 224 @ 60.000000
+- 2560 x 237 @ 60.000000
+- 2560 x 256 @ 50.000000
+- 2560 x 254 @ 55.000000
+- 2560 x 448 @ 60.000000
+- 2560 x 480 @ 60.000000
 
-<tt>make -f Makefile.ps3.salamander</tt>
+Install these modelines replacing 2560 with your desired super resolution. The above resolutions are NTSC only so if you would be playing any PAL content please add pal modelines:
 
-2) Finally, compile RetroArch packed together with the GUI:
+- 2560 x 192 @ 50.000000
+- 2560 x 200 @ 50.000000
+- 2560 x 240 @ 50.000000
+- 2560 x 224 @ 50.000000
+- 2560 x 288 @ 50.000000
+- 2560 x 237 @ 50.000000
+- 2560 x 254 @ 55.000000
+- 2560 x 448 @ 50.000000
+- 2560 x 480 @ 50.000000
 
-<tt>make -f Makefile.ps3</tt>
+Some games will require higher PAL resolutions which should also be installed:
 
-<b>PlayStation3 - Creating a PKG installable file</b><br />
+- 2560 x 512 @ 50.000000
+- 2560 x 576 @ 50.000000
 
-You can add `pkg` as a parameter in order to make a PKG file - for example:
+Ideally install all these modelines and everything will work great.
 
-<tt>make -f Makefile.ps3 pkg</tt>
+## Super Resolutions
 
-This creates an NPDRM package. This can be installed on debug PS3s.
+The default super resolution is 2560. It is displayed just under the CRT switch option, which can be found in video settings. This can be changed within the retroarch.cfg. The only compatible resolutions are 1920, 2560 and 3840. Any other resolutions will be ignored and native switching will be activated.
 
-To make a non-NPDRM package that can be installed on a jailbroken/CFW PS3 (such as PSGroove or PS3 CFWs and other 3.55 CFW derivatives), do:
+## Native Resolutions
 
-<tt>make -f Makefile.ps3 pkg-signed</tt>
+If native resolutions are activated you will need a whole new set of modelines:
 
-If you're using Kmeaw 3.55 firmware, the package needs to be signed:
+- 512 x 240 @ 50.006977 SNESpal
+- 512 x 224 @ 50.006977 SNESpal
+- 512 x 448 @ 50.006977 SNESpal
+- 512 x 240 @ 60.098812 SNESntsc
+- 512 x 224 @ 60.098812 SNESntsc
+- 512 x 448 @ 60.098812 SNESntsc
+- 256 x 240 @ 50.006977 SNESpal
+- 256 x 448 @ 50.006977 SNESpal
+- 256 x 240 @ 60.098812 SNESntsc
+- 256 x 448 @ 60.098812 SNESntsc
+- 320 x 240 @ 59.922745 MDntsc
+- 320 x 448 @ 59.922745 MDntp
+- 320 x 480 @ 59.922745 MDntsc
+- 256 x 192 @ 59.922745 MDntsc
+- 320 x 224 @ 59.922745 MDntsc
+- 256 x 224 @ 59.922745 MDntsc
+- 320 x 288 @ 49.701458 MDpal
+- 320 x 576 @ 49.701458 MDpal
+- 256 x 192 @ 49.701458 MDpal
+- 320 x 224 @ 49.701458 MDpal
+- 320 x 240 @ 49.701458 MDpal
+- 320 x 448 @ 49.701458 MDpal
+- 320 x 480 @ 49.701458 MDpal
+- 256 x 224 @ 49.701458 MDpal
+- 256 x 288 @ 49.701458 MSYSpal
+- 256 x 240 @ 60.098812 NESntsc
+- 256 x 240 @ 50.006977 NESpal
 
-<tt>make -f Makefile.ps3 pkg-signed-cfw</tt>
+- 640 x 480 @ 60.130001 N64ntsc
+- 640 x 237 @ 60.130001 N64ntsc
+- 640 x 240 @ 60.130001 N64ntsc
+- 640 x 480 @ 50.000000 N64pal
+- 640 x 576 @ 50.000000 n64pal
+- 640 x 288 @ 50.000000 n64pal
 
-NOTE: A pre-existing libretro library needs to be present in the root directory in order to link RetroArch PS3. This file needs to be called <em><b>`libretro_ps3.a`</b></em>.
+- 256 x 252 @ 49.759998 PSXpal
+- 384 x 252 @ 49.759998 PSXpal
+- 640 x 540 @ 49.759998 PSXpal
+- 320 x 252 @ 49.759998 PSXpal
+- 640 x 252 @ 49.759998 PSXpal
 
-<b> Xbox 360 (XeXDK)</b><br />
+- 384 x 240 @ 59.941002 PSXntsc
+- 256 x 480 @ 59.941002 PSXntsc
 
-You will need Microsoft Visual Studio 2010 installed (or higher) in order to compile RetroArch 360.
+- 352 x 240 @ 59.820000 Saturn/SGFX_NTSCp
+- 704 x 240 @ 59.820000 SaturnNTSCp
+- 352 x 480 @ 59.820000 SaturnNTSCi
+- 704 x 480 @ 59.820000 SaturnNTSCi
+- 352 x 288 @ 49.701458 SaturnPALp
+- 704 x 288 @ 49.701458 SaturnPALp
+- 352 x 576 @ 49.701458 SaturnPALi
+- 704 x 576 @ 49.701458 SaturnPALi
 
-The solution file can be found at the following location:
+- 240 x 160 @ 59.730000 GBA
+- 320 x 200 @ 60.000000 Doom
 
-<tt>pkg/msvc-360/RetroArch-360.sln</tt>
+// Arcade
 
-NOTE: A pre-existing libretro library needs to be present in the `pkg/msvc-360/RetroArch-360/Release` directory in order to link RetroArch 360. This file needs to be
-called <em><b>`libretro_xdk360.lib`</b></em>.
+- 400 x 254 @ 54.706841 MK
+- 384 x 224 @ 59.637405 CPS1
 
-<b> Xbox 360 (Libxenon)</b><br />
+These modelines are more accurate giving exact hz. However, some games may have unwanted results. This is due to mid-scanline resolution changes on the original hardware. For the best results super resolutions are the way to go.
 
-You will need to have the libxenon libraries and a working Devkit Xenon toolchain installed in order to compile RetroArch 360 Libxenon.
+## CRT resolution switching & Mame
 
-<tt>make -f Makefile.xenon</tt>
+Some arcade resolutions can be a lot different. There is resolution detection to ensure mame games will be displayed in the closest available resolution but drawn at their native resolution within this resolution. Meaning that the mame game will look just like the original hardware.
 
-NOTE: A pre-existing libretro library needs to be present in the root directory in order to link RetroArch 360 Libxenon. This file needs to be called <em><b>`libretro_xenon360.a`</b></em>.
-
-<b> Wii</b><br >
-
-You will need to have the libogc libraries and a working Devkit PPC toolchain installed in order to compile RetroArch Wii.
-
-<tt>make -f Makefile.griffin platform=wii</tt>
-
-NOTE: A pre-existing libretro library needs to be present in the root directory in order to link RetroArch Wii. This file needs to be called <em><b>`libretro_wii.a`</b></em>.
+Mame roms that run in a vertical aspect like DoDonPachi need to be rotated within mame before resolution switching and aspect correction will work. Do this before enabling CRT switchRes so that Retroarch will run in your desktop resolution. Once you have roted any games that may need it switch CRT SwitchRes on.

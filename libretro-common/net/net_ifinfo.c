@@ -1,4 +1,4 @@
-/* Copyright  (C) 2010-2016 The RetroArch team
+/* Copyright  (C) 2010-2018 The RetroArch team
  *
  * ---------------------------------------------------------------------------------------
  * The following license statement only applies to this file (net_ifinfo.c).
@@ -44,6 +44,10 @@
 
 #include <net/net_ifinfo.h>
 
+#if defined(BSD)
+#include <netinet/in.h>
+#endif
+
 void net_ifinfo_free(net_ifinfo_t *list)
 {
    unsigned k;
@@ -53,7 +57,7 @@ void net_ifinfo_free(net_ifinfo_t *list)
 
    for (k = 0; k < list->size; k++)
    {
-      struct net_ifinfo_entry *ptr = 
+      struct net_ifinfo_entry *ptr =
          (struct net_ifinfo_entry*)&list->entries[k];
 
       if (*ptr->name)
@@ -65,26 +69,27 @@ void net_ifinfo_free(net_ifinfo_t *list)
       ptr->host = NULL;
    }
    free(list->entries);
-   free(list);
 }
 
 bool net_ifinfo_new(net_ifinfo_t *list)
 {
    unsigned k              = 0;
 #if defined(_WIN32) && !defined(_XBOX)
+   PIP_ADAPTER_ADDRESSES adapter_addresses = NULL, aa = NULL;
+   PIP_ADAPTER_UNICAST_ADDRESS ua = NULL;
+#ifdef _WIN32_WINNT_WINXP
    DWORD size;
-   PIP_ADAPTER_ADDRESSES adapter_addresses, aa;
-   PIP_ADAPTER_UNICAST_ADDRESS ua;
-
    DWORD rv = GetAdaptersAddresses(AF_UNSPEC, GAA_FLAG_INCLUDE_PREFIX, NULL, NULL, &size);
 
    adapter_addresses = (PIP_ADAPTER_ADDRESSES)malloc(size);
 
    rv = GetAdaptersAddresses(AF_UNSPEC, GAA_FLAG_INCLUDE_PREFIX, NULL, adapter_addresses, &size);
 
+   memset(list, 0, sizeof(net_ifinfo_t));
+
    if (rv != ERROR_SUCCESS)
       goto error;
-
+#endif
    for (aa = adapter_addresses; aa != NULL; aa = aa->Next)
    {
       char name[PATH_MAX_LENGTH];
@@ -121,6 +126,8 @@ bool net_ifinfo_new(net_ifinfo_t *list)
 #else
    struct ifaddrs *ifa     = NULL;
    struct ifaddrs *ifaddr  = NULL;
+
+   memset(list, 0, sizeof(net_ifinfo_t));
 
    if (getifaddrs(&ifaddr) == -1)
       goto error;

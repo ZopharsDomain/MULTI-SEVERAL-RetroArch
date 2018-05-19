@@ -1,6 +1,7 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
- * 
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
+ *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
  *  ation, either version 3 of the License, or (at your option) any later version.
@@ -55,20 +56,18 @@ static void err_cb(void *userdata)
    scond_signal(rsd->cond);
 }
 
-static void *rs_init(const char *device, unsigned rate, unsigned latency)
+static void *rs_init(const char *device, unsigned rate, unsigned latency,
+      unsigned block_frames,
+      unsigned *new_rate)
 {
    int channels, format;
-   rsd_t *rsd = (rsd_t*)calloc(1, sizeof(rsd_t));
+   rsound_t *rd  = NULL;
+   rsd_t *rsd    = (rsd_t*)calloc(1, sizeof(rsd_t));
    if (!rsd)
       return NULL;
 
-   rsound_t *rd;
-
    if (rsd_init(&rd) < 0)
-   {
-      free(rsd);
-      return NULL;
-   }
+      goto error;
 
    rsd->cond_lock = slock_new();
    rsd->cond      = scond_new();
@@ -92,12 +91,15 @@ static void *rs_init(const char *device, unsigned rate, unsigned latency)
    if (rsd_start(rd) < 0)
    {
       free(rsd);
-      rsd_free(rd);
-      return NULL;
+      goto error;
    }
 
    rsd->rd = rd;
    return rsd;
+
+error:
+   rsd_free(rd);
+   return NULL;
 }
 
 static ssize_t rs_write(void *data, const void *buf, size_t size)
@@ -175,7 +177,7 @@ static bool rs_alive(void *data)
    return false;
 }
 
-static bool rs_start(void *data)
+static bool rs_start(void *data, bool is_shutdown)
 {
    rsd_t *rsd = (rsd_t*)data;
    if (rsd_start(rsd->rd) < 0)

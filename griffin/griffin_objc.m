@@ -1,5 +1,5 @@
 /* RetroArch - A frontend for libretro.
-* Copyright (C) 2011-2016 - Daniel De Matteis
+* Copyright (C) 2011-2017 - Daniel De Matteis
 *
 * RetroArch is free software: you can redistribute it and/or modify it under the terms
 * of the GNU General Public License as published by the Free Software Found-
@@ -28,7 +28,7 @@
 #endif
 
 #if defined(HAVE_COCOATOUCH) || defined(HAVE_COCOA)
-#include "../gfx/drivers_context/cocoa_gl_ctx.m"
+#include "../gfx/drivers_context/macos_ctx.m"
 #include "../ui/drivers/cocoa/cocoa_common.m"
 
 #if defined(HAVE_COCOATOUCH)

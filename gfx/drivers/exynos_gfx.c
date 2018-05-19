@@ -1,5 +1,6 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2013-2015 - Tobias Jakobi
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -35,11 +36,14 @@
 #include "../../config.h"
 #endif
 
+#ifdef HAVE_MENU
+#include "../../menu/menu_driver.h"
+#endif
+
 #include "../common/drm_common.h"
 #include "../font_driver.h"
+#include "../../configuration.h"
 #include "../../retroarch.h"
-#include "../../runloop.h"
-#include "../../runloop.h"
 
 /* TODO: Honor these properties: vsync, menu rotation, menu alpha, aspect ratio change */
 
@@ -177,7 +181,7 @@ static int exynos_get_device_index(void)
 
       ver = drmGetVersion(fd);
 
-      if (string_is_equal("exynos", ver->name))
+      if (string_is_equal(ver->name, "exynos"))
          found = true;
       else
          ++index;
@@ -191,10 +195,10 @@ static int exynos_get_device_index(void)
    return index;
 }
 
-/* The main pageflip handler, which the DRM executes 
+/* The main pageflip handler, which the DRM executes
  * when it flips to the page.
  *
- * Decreases the pending pageflip count and 
+ * Decreases the pending pageflip count and
  * updates the current page.
  */
 static void exynos_page_flip_handler(int fd, unsigned frame, unsigned sec,
@@ -218,7 +222,7 @@ static struct exynos_page *exynos_get_free_page(
 {
    unsigned i;
 
-   for (i = 0; i < cnt; ++i) 
+   for (i = 0; i < cnt; ++i)
    {
       if (!p[i].used)
          return &p[i];
@@ -593,13 +597,13 @@ static int exynos_init(struct exynos_data *pdata, unsigned bpp)
    unsigned i;
    settings_t *settings   = config_get_ptr();
 
-   if (settings->video.fullscreen_x != 0 &&
-         settings->video.fullscreen_y != 0)
+   if (settings->uints.video_fullscreen_x != 0 &&
+         settings->uints.video_fullscreen_y != 0)
    {
       for (i = 0; i < g_drm_connector->count_modes; i++)
       {
-         if (g_drm_connector->modes[i].hdisplay == settings->video.fullscreen_x &&
-               g_drm_connector->modes[i].vdisplay == settings->video.fullscreen_y)
+         if (g_drm_connector->modes[i].hdisplay == settings->uints.video_fullscreen_x &&
+               g_drm_connector->modes[i].vdisplay == settings->uints.video_fullscreen_y)
          {
             g_drm_mode = &g_drm_connector->modes[i];
             break;
@@ -609,7 +613,8 @@ static int exynos_init(struct exynos_data *pdata, unsigned bpp)
       if (!g_drm_mode)
       {
          RARCH_ERR("[video_exynos]: requested resolution (%ux%u) not available\n",
-               settings->video.fullscreen_x, settings->video.fullscreen_y);
+               settings->uints.video_fullscreen_x,
+               settings->uints.video_fullscreen_y);
          goto fail;
       }
 
@@ -658,6 +663,7 @@ static void exynos_deinit(struct exynos_data *pdata)
 {
    drm_restore_crtc();
 
+   g_drm_mode       = NULL;
    pdata->width     = 0;
    pdata->height    = 0;
    pdata->num_pages = 0;
@@ -1045,18 +1051,18 @@ static int exynos_init_font(struct exynos_video *vid)
    const unsigned buf_height = defaults[EXYNOS_IMAGE_FONT].height;
    const unsigned buf_width  = align_common(pdata->aspect * (float)buf_height, 16);
    const unsigned buf_bpp    = defaults[EXYNOS_IMAGE_FONT].bpp;
-   settings_t *settings     = config_get_ptr();
+   settings_t *settings      = config_get_ptr();
 
-   if (!settings->video.font_enable)
+   if (!settings->bools.video_font_enable)
       return 0;
 
    if (font_renderer_create_default(&vid->font_driver, &vid->font,
             *settings->video.font_path ? settings->video.font_path : NULL,
-            settings->video.font_size))
+            settings->floats.video_font_size))
    {
-      const int r = settings->video.msg_color_r * 15;
-      const int g = settings->video.msg_color_g * 15;
-      const int b = settings->video.msg_color_b * 15;
+      const int r = settings->floats.video_msg_color_r * 15;
+      const int g = settings->floats.video_msg_color_g * 15;
+      const int b = settings->floats.video_msg_color_b * 15;
 
       vid->font_color = ((b < 0 ? 0 : (b > 15 ? 15 : b)) << 0) |
          ((g < 0 ? 0 : (g > 15 ? 15 : g)) << 4) |
@@ -1095,8 +1101,8 @@ static int exynos_render_msg(struct exynos_video *vid,
    struct exynos_data *pdata = vid->data;
    struct g2d_image *dst     = pdata->src[EXYNOS_IMAGE_FONT];
    settings_t *settings      = config_get_ptr();
-   int msg_base_x            = settings->video.msg_pos_x * dst->width;
-   int msg_base_y            = (1.0f - settings->video.msg_pos_y) * dst->height;
+   int msg_base_x            = settings->floats.video_msg_pos_x * dst->width;
+   int msg_base_y            = (1.0f - settings->floats.video_msg_pos_y) * dst->height;
 
    if (!vid->font || !vid->font_driver)
       return -1;
@@ -1158,7 +1164,6 @@ static int exynos_render_msg(struct exynos_video *vid,
 
    return exynos_blend_font(pdata);
 }
-
 
 static void *exynos_gfx_init(const video_info_t *video,
       const input_driver_t **input, void **input_data)
@@ -1272,11 +1277,11 @@ static void exynos_gfx_free(void *data)
 }
 
 static bool exynos_gfx_frame(void *data, const void *frame, unsigned width,
-      unsigned height, uint64_t frame_count, unsigned pitch, const char *msg)
+      unsigned height, uint64_t frame_count, unsigned pitch, const char *msg,
+      video_frame_info_t *video_info)
 {
    struct exynos_video *vid = data;
    struct exynos_page *page = NULL;
-   settings_t *settings      = config_get_ptr();
 
    /* Check if neither menu nor core framebuffer is to be displayed. */
    if (!vid->menu_active && !frame)
@@ -1304,15 +1309,6 @@ static bool exynos_gfx_frame(void *data, const void *frame, unsigned width,
          goto fail;
    }
 
-   if (settings->fps_show)
-   {
-      char buffer[128]     = {0};
-      char buffer_fps[128] = {0};
-      video_monitor_get_fps(buffer, sizeof(buffer),
-            settings->fps_show ? buffer_fps : NULL, sizeof(buffer_fps));
-      runloop_msg_queue_push(buffer_fps, 1, 1, false);
-   }
-
    /* If at this point the dimension parameters are still zero, setup some  *
     * fake blit parameters so that menu and font rendering work properly.   */
    if (vid->width == 0 || vid->height == 0)
@@ -1325,6 +1321,20 @@ static bool exynos_gfx_frame(void *data, const void *frame, unsigned width,
    {
       if (exynos_blend_menu(vid->data, vid->menu_rotation) != 0)
          goto fail;
+#ifdef HAVE_MENU
+      menu_driver_frame(video_info);
+#endif
+   }
+   else if (video_info->statistics_show)
+   {
+      struct font_params *osd_params = video_info ? 
+         (struct font_params*)&video_info->osd_stat_params : NULL;
+
+      if (osd_params)
+      {
+         font_driver_render_msg(video_info, NULL, video_info->stat_text,
+               (const struct font_params*)&video_info->osd_stat_params);
+      }
    }
 
    if (msg)
@@ -1372,13 +1382,6 @@ static bool exynos_gfx_suppress_screensaver(void *data, bool enable)
 {
    (void)data;
    (void)enable;
-
-   return false;
-}
-
-static bool exynos_gfx_has_windowed(void *data)
-{
-   (void)data;
 
    return false;
 }
@@ -1487,9 +1490,13 @@ static void exynos_show_mouse(void *data, bool state)
 }
 
 static const video_poke_interface_t exynos_poke_interface = {
+   NULL, /* get_flags */
+   NULL, /* set_coords */
+   NULL, /* set_mvp */
    NULL,
    NULL,
    NULL, /* set_video_mode */
+   drm_get_refresh_rate,
    NULL, /* set_filtering */
    NULL, /* get_video_output_size */
    NULL, /* get_video_output_prev */
@@ -1498,12 +1505,14 @@ static const video_poke_interface_t exynos_poke_interface = {
    NULL, /* get_proc_address */
    exynos_set_aspect_ratio,
    exynos_apply_state_changes,
-#ifdef HAVE_MENU
    exynos_set_texture_frame,
    exynos_set_texture_enable,
-#endif
    exynos_set_osd_msg,
-   exynos_show_mouse
+   exynos_show_mouse,
+   NULL,                         /* grab_mouse_toggle */
+   NULL,                         /* get_current_shader */
+   NULL,                         /* get_current_software_framebuffer */
+   NULL                          /* get_hw_render_interface */
 };
 
 static void exynos_gfx_get_poke_interface(void *data,
@@ -1520,10 +1529,10 @@ static bool exynos_gfx_set_shader(void *data,
    (void)type;
    (void)path;
 
-   return false; 
+   return false;
 }
 
-static bool exynos_gfx_read_viewport(void *data, uint8_t *buffer)
+static bool exynos_gfx_read_viewport(void *data, uint8_t *buffer, bool is_idle)
 {
    (void)data;
    (void)buffer;
@@ -1538,7 +1547,7 @@ video_driver_t video_exynos = {
   exynos_gfx_alive,
   exynos_gfx_focus,
   exynos_gfx_suppress_screensaver,
-  exynos_gfx_has_windowed,
+  NULL, /* has_windowed */
   exynos_gfx_set_shader,
   exynos_gfx_free,
   "exynos",

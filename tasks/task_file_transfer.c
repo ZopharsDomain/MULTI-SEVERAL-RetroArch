@@ -1,5 +1,5 @@
 /*  RetroArch - A frontend for libretro.
- *  Copyright (C) 2011-2016 - Daniel De Matteis
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -16,23 +16,20 @@
 #include <string.h>
 #include <errno.h>
 #include <file/nbio.h>
-#include <formats/image.h>
 #include <compat/strl.h>
-#include <retro_assert.h>
 #include <retro_miscellaneous.h>
-#include <lists/string_list.h>
-#include <rhash.h>
+
+#include <string/stdstring.h>
 
 #include "tasks_internal.h"
 #include "../verbosity.h"
+
+bool task_image_load_handler(retro_task_t *task);
 
 static int task_file_transfer_iterate_transfer(nbio_handle_t *nbio)
 {
    size_t i;
 
-   if (!nbio)
-      return -1;
-   
    nbio->pos_increment = 5;
 
    if (nbio->is_finished)
@@ -49,9 +46,6 @@ static int task_file_transfer_iterate_transfer(nbio_handle_t *nbio)
 
 static int task_file_transfer_iterate_parse(nbio_handle_t *nbio)
 {
-   if (!nbio)
-      return -1;
-
    if (nbio->cb)
    {
       int len = 0;
@@ -66,41 +60,68 @@ void task_file_load_handler(retro_task_t *task)
 {
    nbio_handle_t         *nbio  = (nbio_handle_t*)task->state;
 
-   switch (nbio->status)
+   if (nbio)
    {
-      case NBIO_STATUS_TRANSFER_PARSE:
-         if (task_file_transfer_iterate_parse(nbio) == -1)
-            task->cancelled = true;
-         nbio->status = NBIO_STATUS_TRANSFER_PARSE_FREE;
-         break;
-      case NBIO_STATUS_TRANSFER:
-         if (task_file_transfer_iterate_transfer(nbio) == -1)
-            nbio->status = NBIO_STATUS_TRANSFER_PARSE;
-         break;
-      case NBIO_STATUS_TRANSFER_PARSE_FREE:
-      case NBIO_STATUS_POLL:
-      default:
-         break;
+      switch (nbio->status)
+      {
+         case NBIO_STATUS_INIT:
+            if (nbio && !string_is_empty(nbio->path))
+            {
+               struct nbio_t *handle = (struct nbio_t*)nbio_open(nbio->path, NBIO_READ);
+
+               if (handle)
+               {
+                  nbio->handle       = handle;
+                  nbio->status       = NBIO_STATUS_TRANSFER;
+
+                  nbio_begin_read(handle);
+                  return;
+               }
+               else
+                  task_set_cancelled(task, true);
+            }
+            break;
+         case NBIO_STATUS_TRANSFER_PARSE:
+            if (!nbio || task_file_transfer_iterate_parse(nbio) == -1)
+               task_set_cancelled(task, true);
+            nbio->status = NBIO_STATUS_TRANSFER_FINISHED;
+            break;
+         case NBIO_STATUS_TRANSFER:
+            if (!nbio || task_file_transfer_iterate_transfer(nbio) == -1)
+               nbio->status = NBIO_STATUS_TRANSFER_PARSE;
+            break;
+         case NBIO_STATUS_TRANSFER_FINISHED:
+            break;
+      }
+
+      switch (nbio->type)
+      {
+         case NBIO_TYPE_PNG:
+         case NBIO_TYPE_JPEG:
+         case NBIO_TYPE_TGA:
+         case NBIO_TYPE_BMP:
+            if (!task_image_load_handler(task))
+               task_set_finished(task, true);
+            break;
+         case NBIO_TYPE_MP3:
+         case NBIO_TYPE_FLAC:
+         case NBIO_TYPE_OGG:
+         case NBIO_TYPE_MOD:
+         case NBIO_TYPE_WAV:
+            if (!task_audio_mixer_load_handler(task))
+               task_set_finished(task, true);
+            break;
+         case NBIO_TYPE_NONE:
+         default:
+            if (nbio->is_finished)
+               task_set_finished(task, true);
+            break;
+      }
    }
 
-   switch (nbio->image_type)
+   if (task_get_cancelled(task))
    {
-      case IMAGE_TYPE_PNG:
-      case IMAGE_TYPE_JPEG:
-      case IMAGE_TYPE_TGA:
-      case IMAGE_TYPE_BMP:
-         if (!task_image_load_handler(task))
-            task->finished = true;
-         break;
-      case 0:
-         if (nbio->is_finished)
-            task->finished = true;
-         break;
-   }
-
-   if (task->cancelled)
-   {
-      task->error = strdup("Task canceled.");
-      task->finished = true;
+      task_set_error(task, strdup("Task canceled."));
+      task_set_finished(task, true);
    }
 }

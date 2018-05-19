@@ -1,7 +1,7 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
- *  Copyright (C) 2011-2016 - Daniel De Matteis
- *  Copyright (C) 2016 - Brad Parker
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
+ *  Copyright (C) 2016-2017 - Brad Parker
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -25,6 +25,7 @@
 
 #include <boolean.h>
 #include <retro_common_api.h>
+#include <retro_miscellaneous.h>
 
 #include "frontend/frontend_driver.h"
 
@@ -59,15 +60,14 @@ bool content_undo_load_state(void);
 /* Restores the last savestate file which was overwritten */
 bool content_undo_save_state(void);
 
-bool content_does_not_need_content(void);
+void content_get_status(bool *contentless,
+      bool *is_inited);
 
 void content_set_does_not_need_content(void);
 
 void content_unset_does_not_need_content(void);
 
-bool content_get_crc(uint32_t **content_crc_ptr);
-
-bool content_is_inited(void);
+uint32_t content_get_crc(void);
 
 void content_deinit(void);
 
@@ -81,6 +81,27 @@ bool content_reset_savestate_backups(void);
 /* Checks if the buffers are empty */
 bool content_undo_load_buf_is_empty(void);
 bool content_undo_save_buf_is_empty(void);
+
+/* Clears the pending subsystem rom buffer*/
+bool content_is_subsystem_pending_load(void);
+
+/* Clears the pending subsystem rom buffer*/
+void content_clear_subsystem(void);
+
+/* Set the current subsystem*/
+void content_set_subsystem(unsigned subsystem);
+
+/* Get the current subsystem*/
+int content_get_subsystem(void);
+
+/* Add a rom to the subsystem rom buffer */
+void content_add_subsystem(const char* path);
+
+/* Get the current subsystem rom id */
+unsigned content_get_subsystem_rom_id(void);
+
+/* Set environment variables before a subsystem load */
+void content_set_subsystem_info(void);
 
 RETRO_END_DECLS
 

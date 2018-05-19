@@ -1,5 +1,5 @@
 /* RetroArch - A frontend for libretro.
- *  Copyright (C) 2011-2016 - Daniel De Matteis
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
  *
  * RetroArch is free software: you can redistribute it and/or modify it under the terms
  * of the GNU General Public License as published by the Free Software Found-
@@ -41,7 +41,7 @@ static enum ui_msg_window_response ui_msg_window_null_warning(ui_msg_window_stat
    return UI_MSG_RESPONSE_CANCEL;
 }
 
-const ui_msg_window_t ui_msg_window_null = {
+ui_msg_window_t ui_msg_window_null = {
    ui_msg_window_null_error,
    ui_msg_window_null_information,
    ui_msg_window_null_question,

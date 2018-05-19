@@ -1,4 +1,4 @@
-/* Copyright  (C) 2010-2016 The RetroArch team
+/* Copyright  (C) 2010-2018 The RetroArch team
  *
  * ---------------------------------------------------------------------------------------
  * The following license statement only applies to this file (pixconv.h).
@@ -24,6 +24,11 @@
 #define __LIBRETRO_SDK_SCALER_PIXCONV_H__
 
 #include <clamping.h>
+
+#include <retro_common_api.h>
+
+RETRO_BEGIN_DECLS
+
 
 void conv_0rgb1555_argb8888(void *output, const void *input,
       int width, int height,
@@ -88,6 +93,8 @@ void conv_yuyv_argb8888(void *output, const void *input,
 void conv_copy(void *output, const void *input,
       int width, int height,
       int out_stride, int in_stride);
+
+RETRO_END_DECLS
 
 #endif
 

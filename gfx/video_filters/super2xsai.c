@@ -14,7 +14,7 @@
  *  If not, see <http://www.gnu.org/licenses/>.
  */
 
-// Compile: gcc -o supertwoxsai.so -shared supertwoxsai.c -std=c99 -O3 -Wall -pedantic -fPIC
+/* Compile: gcc -o supertwoxsai.so -shared supertwoxsai.c -std=c99 -O3 -Wall -pedantic -fPIC */
 
 #include "softfilter.h"
 #include <stdlib.h>
@@ -201,7 +201,7 @@ static void supertwoxsai_generic_destroy(void *data)
 #endif
 
 static void supertwoxsai_generic_xrgb8888(unsigned width, unsigned height,
-      int first, int last, uint32_t *src, 
+      int first, int last, uint32_t *src,
       unsigned src_stride, uint32_t *dst, unsigned dst_stride)
 {
    unsigned finish;
@@ -221,7 +221,7 @@ static void supertwoxsai_generic_xrgb8888(unsigned width, unsigned height,
          //                             1  2  3 S1
          //                               A1 A2
          //--------------------------------------
-         
+
          supertwoxsai_function(supertwoxsai_result, supertwoxsai_interpolate_xrgb8888, supertwoxsai_interpolate2_xrgb8888);
       }
 
@@ -231,7 +231,7 @@ static void supertwoxsai_generic_xrgb8888(unsigned width, unsigned height,
 }
 
 static void supertwoxsai_generic_rgb565(unsigned width, unsigned height,
-      int first, int last, uint16_t *src, 
+      int first, int last, uint16_t *src,
       unsigned src_stride, uint16_t *dst, unsigned dst_stride)
 {
    unsigned finish;
@@ -251,7 +251,7 @@ static void supertwoxsai_generic_rgb565(unsigned width, unsigned height,
          //                             1  2  3 S1
          //                               A1 A2
          //--------------------------------------
-         
+
          supertwoxsai_function(supertwoxsai_result, supertwoxsai_interpolate_rgb565, supertwoxsai_interpolate2_rgb565);
       }
 
@@ -269,7 +269,10 @@ static void supertwoxsai_work_cb_rgb565(void *data, void *thread_data)
    unsigned height = thr->height;
 
    supertwoxsai_generic_rgb565(width, height,
-         thr->first, thr->last, input, thr->in_pitch / SOFTFILTER_BPP_RGB565, output, thr->out_pitch / SOFTFILTER_BPP_RGB565);
+         thr->first, thr->last, input,
+        (unsigned)(thr->in_pitch / SOFTFILTER_BPP_RGB565),
+        output,
+        (unsigned)(thr->out_pitch / SOFTFILTER_BPP_RGB565));
 }
 
 static void supertwoxsai_work_cb_xrgb8888(void *data, void *thread_data)
@@ -281,7 +284,10 @@ static void supertwoxsai_work_cb_xrgb8888(void *data, void *thread_data)
    unsigned height = thr->height;
 
    supertwoxsai_generic_xrgb8888(width, height,
-         thr->first, thr->last, input, thr->in_pitch / SOFTFILTER_BPP_XRGB8888, output, thr->out_pitch / SOFTFILTER_BPP_XRGB8888);
+         thr->first, thr->last, input,
+            (unsigned)(thr->in_pitch / SOFTFILTER_BPP_XRGB8888),
+            output,
+            (unsigned)(thr->out_pitch / SOFTFILTER_BPP_XRGB8888));
 }
 
 static void supertwoxsai_generic_packets(void *data,

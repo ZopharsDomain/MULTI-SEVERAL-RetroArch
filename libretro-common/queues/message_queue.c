@@ -1,4 +1,4 @@
-/* Copyright  (C) 2010-2016 The RetroArch team
+/* Copyright  (C) 2010-2018 The RetroArch team
  *
  * ---------------------------------------------------------------------------------------
  * The following license statement only applies to this file (message_queue.c).
@@ -54,20 +54,25 @@ struct msg_queue
  **/
 msg_queue_t *msg_queue_new(size_t size)
 {
-   msg_queue_t *queue = (msg_queue_t*)calloc(1, sizeof(*queue));
+   struct queue_elem **elems = NULL;
+   msg_queue_t *queue        = (msg_queue_t*)calloc(1, sizeof(*queue));
+
    if (!queue)
       return NULL;
 
    queue->size = size + 1;
-   queue->elems = (struct queue_elem**)
-      calloc(queue->size,sizeof(struct queue_elem*)); 
 
-   if (!queue->elems)
+   elems = (struct queue_elem**)calloc(queue->size,
+         sizeof(struct queue_elem*));
+
+   if (!elems)
    {
       free(queue);
       return NULL;
    }
-   queue->ptr = 1;
+
+   queue->elems = elems;
+   queue->ptr   = 1;
 
    return queue;
 }
@@ -177,9 +182,9 @@ const char *msg_queue_pull(msg_queue_t *queue)
 {
    struct queue_elem *front  = NULL, *last = NULL;
    size_t tmp_ptr = 1;
-    
+
    (void)tmp_ptr;
-    
+
    /* Nothing in queue. */
    if (!queue || queue->ptr == 1)
       return NULL;

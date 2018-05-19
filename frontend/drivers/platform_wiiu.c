@@ -1,5 +1,6 @@
 /* RetroArch - A frontend for libretro.
  *  Copyright (C) 2014-2016 - Ali Bouhlel
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
  *
  * RetroArch is free software: you can redistribute it and/or modify it under the terms
  * of the GNU General Public License as published by the Free Software Found-
@@ -13,89 +14,106 @@
  * If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <stdint.h>
-#include <stddef.h>
-#include <string.h>
-#include <ctype.h>
-#include <boolean.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <sys/iosupport.h>
+#include <net/net_compat.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
 
+#include <wiiu/types.h>
+#include <wiiu/ac.h>
 #include <file/file_path.h>
 
+#ifndef IS_SALAMANDER
 #include <lists/file_list.h>
+#endif
 
-#include "../frontend_driver.h"
+#include <string/stdstring.h>
+
+#include <wiiu/gx2.h>
+#include <wiiu/kpad.h>
+#include <wiiu/ios.h>
+#include <wiiu/os.h>
+#include <wiiu/procui.h>
+#include <wiiu/sysapp.h>
+
+#include "file_path_special.h"
+
 #include "../frontend.h"
-#include "../../configuration.h"
-#include "../../verbosity.h"
+#include "../frontend_driver.h"
 #include "../../defaults.h"
 #include "../../paths.h"
-#include "retroarch.h"
-#include "file_path_special.h"
-#include "audio/audio_driver.h"
+#include "../../verbosity.h"
+#include "../../retroarch.h"
+#include "../../gfx/video_driver.h"
 
 
-#include "tasks/tasks_internal.h"
-#include "runloop.h"
-#include <nsysnet/socket.h>
-#include "fs/fs_utils.h"
-#include "fs/sd_fat_devoptab.h"
-#include "system/dynamic.h"
-#include "system/memory.h"
-#include "system/exception_handler.h"
-#include "system/exception.h"
-#include "utils/logger.h"
-#include <sys/iosupport.h>
-
-#include <coreinit/screen.h>
-#include <vpad/input.h>
-
+#include "hbl.h"
 #include "wiiu_dbg.h"
+#include "system/exception_handler.h"
+#include "tasks/tasks_internal.h"
 
+#ifndef IS_SALAMANDER
 #ifdef HAVE_MENU
 #include "../../menu/menu_driver.h"
 #endif
+#endif
+
+#define WIIU_SD_PATH "sd:/"
+#define WIIU_USB_PATH "usb:/"
+
+/**
+ * The Wii U frontend driver, along with the main() method.
+ */
 
 static enum frontend_fork wiiu_fork_mode = FRONTEND_FORK_NONE;
-static const char* elf_path_cst = "sd:/retroarch/retroarch.elf";
+static const char *elf_path_cst = WIIU_SD_PATH "retroarch/retroarch.elf";
 
 static void frontend_wiiu_get_environment_settings(int *argc, char *argv[],
       void *args, void *params_data)
 {
+   unsigned i;
    (void)args;
-   DEBUG_LINE();
 
-   fill_pathname_basedir(g_defaults.dir.port, elf_path_cst, sizeof(g_defaults.dir.port));
-   DEBUG_LINE();
-   RARCH_LOG("port dir: [%s]\n", g_defaults.dir.port);
+   fill_pathname_basedir(g_defaults.dirs[DEFAULT_DIR_PORT], elf_path_cst, sizeof(g_defaults.dirs[DEFAULT_DIR_PORT]));
 
-   fill_pathname_join(g_defaults.dir.core_assets, g_defaults.dir.port,
-         "downloads", sizeof(g_defaults.dir.core_assets));
-   fill_pathname_join(g_defaults.dir.assets, g_defaults.dir.port,
-         "media", sizeof(g_defaults.dir.assets));
-   fill_pathname_join(g_defaults.dir.core, g_defaults.dir.port,
-         "cores", sizeof(g_defaults.dir.core));
-   fill_pathname_join(g_defaults.dir.core_info, g_defaults.dir.core,
-         "info", sizeof(g_defaults.dir.core_info));
-   fill_pathname_join(g_defaults.dir.savestate, g_defaults.dir.core,
-         "savestates", sizeof(g_defaults.dir.savestate));
-   fill_pathname_join(g_defaults.dir.sram, g_defaults.dir.core,
-         "savefiles", sizeof(g_defaults.dir.sram));
-   fill_pathname_join(g_defaults.dir.system, g_defaults.dir.core,
-         "system", sizeof(g_defaults.dir.system));
-   fill_pathname_join(g_defaults.dir.playlist, g_defaults.dir.core,
-         "playlists", sizeof(g_defaults.dir.playlist));
-   fill_pathname_join(g_defaults.dir.menu_config, g_defaults.dir.port,
-         "config", sizeof(g_defaults.dir.menu_config));
-   fill_pathname_join(g_defaults.dir.remap, g_defaults.dir.port,
-         "config/remaps", sizeof(g_defaults.dir.remap));
-   fill_pathname_join(g_defaults.dir.video_filter, g_defaults.dir.port,
-         "filters", sizeof(g_defaults.dir.remap));
-   fill_pathname_join(g_defaults.dir.database, g_defaults.dir.port,
-         "database/rdb", sizeof(g_defaults.dir.database));
-   fill_pathname_join(g_defaults.dir.cursor, g_defaults.dir.port,
-         "database/cursors", sizeof(g_defaults.dir.cursor));
-   fill_pathname_join(g_defaults.path.config, g_defaults.dir.port,
+   fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_CORE_ASSETS], g_defaults.dirs[DEFAULT_DIR_PORT],
+         "downloads", sizeof(g_defaults.dirs[DEFAULT_DIR_CORE_ASSETS]));
+   fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_ASSETS], g_defaults.dirs[DEFAULT_DIR_PORT],
+         "media", sizeof(g_defaults.dirs[DEFAULT_DIR_ASSETS]));
+   fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_CORE], g_defaults.dirs[DEFAULT_DIR_PORT],
+         "cores", sizeof(g_defaults.dirs[DEFAULT_DIR_CORE]));
+   fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_CORE_INFO], g_defaults.dirs[DEFAULT_DIR_CORE],
+         "info", sizeof(g_defaults.dirs[DEFAULT_DIR_CORE_INFO]));
+   fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_SAVESTATE], g_defaults.dirs[DEFAULT_DIR_CORE],
+         "savestates", sizeof(g_defaults.dirs[DEFAULT_DIR_SAVESTATE]));
+   fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_SRAM], g_defaults.dirs[DEFAULT_DIR_CORE],
+         "savefiles", sizeof(g_defaults.dirs[DEFAULT_DIR_SRAM]));
+   fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_SYSTEM], g_defaults.dirs[DEFAULT_DIR_CORE],
+         "system", sizeof(g_defaults.dirs[DEFAULT_DIR_SYSTEM]));
+   fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_PLAYLIST], g_defaults.dirs[DEFAULT_DIR_CORE],
+         "playlists", sizeof(g_defaults.dirs[DEFAULT_DIR_PLAYLIST]));
+   fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_MENU_CONFIG], g_defaults.dirs[DEFAULT_DIR_PORT],
+         "config", sizeof(g_defaults.dirs[DEFAULT_DIR_MENU_CONFIG]));
+   fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_REMAP], g_defaults.dirs[DEFAULT_DIR_PORT],
+         "config/remaps", sizeof(g_defaults.dirs[DEFAULT_DIR_REMAP]));
+   fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_VIDEO_FILTER], g_defaults.dirs[DEFAULT_DIR_PORT],
+         "filters", sizeof(g_defaults.dirs[DEFAULT_DIR_VIDEO_FILTER]));
+   fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_DATABASE], g_defaults.dirs[DEFAULT_DIR_PORT],
+         "database/rdb", sizeof(g_defaults.dirs[DEFAULT_DIR_DATABASE]));
+   fill_pathname_join(g_defaults.dirs[DEFAULT_DIR_CURSOR], g_defaults.dirs[DEFAULT_DIR_PORT],
+         "database/cursors", sizeof(g_defaults.dirs[DEFAULT_DIR_CURSOR]));
+   fill_pathname_join(g_defaults.path.config, g_defaults.dirs[DEFAULT_DIR_PORT],
          file_path_str(FILE_PATH_MAIN_CONFIG), sizeof(g_defaults.path.config));
+
+   for (i = 0; i < DEFAULT_DIR_LAST; i++)
+   {
+      const char *dir_path = g_defaults.dirs[i];
+      if (!string_is_empty(dir_path))
+         path_mkdir(dir_path);
+   }
 }
 
 static void frontend_wiiu_deinit(void *data)
@@ -127,27 +145,145 @@ enum frontend_architecture frontend_wiiu_get_architecture(void)
    return FRONTEND_ARCH_PPC;
 }
 
-static int frontend_wiiu_parse_drive_list(void *data)
+static int frontend_wiiu_parse_drive_list(void *data, bool load_content)
 {
-   file_list_t *list = (file_list_t*)data;
+#ifndef IS_SALAMANDER
+   file_list_t *list = (file_list_t *)data;
+   enum msg_hash_enums enum_idx = load_content ?
+      MENU_ENUM_LABEL_FILE_DETECT_CORE_LIST_PUSH_DIR :
+      MSG_UNKNOWN;
 
    if (!list)
       return -1;
 
-   menu_entries_append_enum(list,
-         "sd:/", "", MSG_UNKNOWN, FILE_TYPE_DIRECTORY, 0, 0);
+   menu_entries_append_enum(list, WIIU_SD_PATH,
+         msg_hash_to_str(MENU_ENUM_LABEL_FILE_DETECT_CORE_LIST_PUSH_DIR),
+         enum_idx,
+         FILE_TYPE_DIRECTORY, 0, 0);
 
+   menu_entries_append_enum(list, WIIU_USB_PATH,
+         msg_hash_to_str(MENU_ENUM_LABEL_FILE_DETECT_CORE_LIST_PUSH_DIR),
+         enum_idx,
+         FILE_TYPE_DIRECTORY, 0, 0);
+#endif
    return 0;
 }
 
-frontend_ctx_driver_t frontend_ctx_wiiu = {
+
+static void frontend_wiiu_exec(const char *path, bool should_load_game)
+{
+
+   struct
+   {
+      u32 magic;
+      u32 argc;
+      char * argv[3];
+      char args[];
+   }*param     = getApplicationEndAddr();
+   int len     = 0;
+   param->argc = 0;
+
+   if(!path || !*path)
+   {
+      RARCH_LOG("No executable path provided, cannot Restart\n");
+   }
+
+   DEBUG_STR(path);
+
+   strcpy(param->args + len, elf_path_cst);
+   param->argv[param->argc] = param->args + len;
+   len += strlen(param->args + len) + 1;
+   param->argc++;
+
+   RARCH_LOG("Attempt to load core: [%s].\n", path);
+#ifndef IS_SALAMANDER
+   if (should_load_game && !path_is_empty(RARCH_PATH_CONTENT))
+   {
+      strcpy(param->args + len, path_get(RARCH_PATH_CONTENT));
+      param->argv[param->argc] = param->args + len;
+      len += strlen(param->args + len) + 1;
+      param->argc++;
+
+      RARCH_LOG("content path: [%s].\n", path_get(RARCH_PATH_CONTENT));
+   }
+#endif
+   param->argv[param->argc] = NULL;
+
+   {
+      if (HBL_loadToMemory(path, (u32)param->args - (u32)param + len) < 0)
+         RARCH_LOG("Failed to load core\n");
+      else
+      {
+         param->magic = ARGV_MAGIC;
+         ARGV_PTR = param;
+         DEBUG_VAR(param->argc);
+         DEBUG_VAR(param->argv);
+
+      }
+   }
+}
+
+#ifndef IS_SALAMANDER
+static bool frontend_wiiu_set_fork(enum frontend_fork fork_mode)
+{
+   switch (fork_mode)
+   {
+      case FRONTEND_FORK_CORE:
+         RARCH_LOG("FRONTEND_FORK_CORE\n");
+         wiiu_fork_mode  = fork_mode;
+         break;
+      case FRONTEND_FORK_CORE_WITH_ARGS:
+         RARCH_LOG("FRONTEND_FORK_CORE_WITH_ARGS\n");
+         wiiu_fork_mode  = fork_mode;
+         break;
+      case FRONTEND_FORK_RESTART:
+         RARCH_LOG("FRONTEND_FORK_RESTART\n");
+         /* NOTE: We don't implement Salamander, so just turn
+          * this into FRONTEND_FORK_CORE. */
+         wiiu_fork_mode  = FRONTEND_FORK_CORE;
+         break;
+      case FRONTEND_FORK_NONE:
+      default:
+         return false;
+   }
+
+   return true;
+}
+#endif
+
+static void frontend_wiiu_exitspawn(char *s, size_t len)
+{
+   bool should_load_game = false;
+#ifndef IS_SALAMANDER
+   if (wiiu_fork_mode == FRONTEND_FORK_NONE)
+      return;
+
+   switch (wiiu_fork_mode)
+   {
+      case FRONTEND_FORK_CORE_WITH_ARGS:
+         should_load_game = true;
+         break;
+      default:
+         break;
+   }
+#endif
+   frontend_wiiu_exec(s, should_load_game);
+}
+
+
+frontend_ctx_driver_t frontend_ctx_wiiu =
+{
    frontend_wiiu_get_environment_settings,
    frontend_wiiu_init,
    frontend_wiiu_deinit,
-   NULL,                         /* exitspawn */
+   frontend_wiiu_exitspawn,
    NULL,                         /* process_args */
-   NULL,                         /* exec */
+   frontend_wiiu_exec,
+#ifdef IS_SALAMANDER
    NULL,                         /* set_fork */
+#else
+   frontend_wiiu_set_fork,
+#endif
    frontend_wiiu_shutdown,
    NULL,                         /* get_name */
    NULL,                         /* get_os */
@@ -164,142 +300,326 @@ frontend_ctx_driver_t frontend_ctx_wiiu = {
    NULL,                         /* destroy_signal_handler_state */
    NULL,                         /* attach_console */
    NULL,                         /* detach_console */
+   NULL,                         /* watch_path_for_changes */
+   NULL,                         /* check_for_path_changes */
    "wiiu",
+   NULL,                         /* get_video_driver */
 };
 
-static int log_socket = -1;
-static volatile int log_lock = 0;
+/* main() and its supporting functions */
 
-void log_init(const char * ipString)
+static void main_setup(void);
+static void get_arguments(int *argc, char ***argv);
+static void do_rarch_main(int argc, char **argv);
+static void main_loop(void);
+static void main_teardown(void);
+
+static void init_network(void);
+static void deinit_network(void);
+static void init_logging(void);
+static void deinit_logging(void);
+static void wiiu_log_init(int port);
+static void wiiu_log_deinit(void);
+static ssize_t wiiu_log_write(struct _reent *r, void *fd, const char *ptr, size_t len);
+static void init_pad_libraries(void);
+static void deinit_pad_libraries(void);
+static void SaveCallback(void);
+static bool swap_is_pending(void *start_time);
+
+static struct sockaddr_in broadcast;
+static int wiiu_log_socket = -1;
+static volatile int wiiu_log_lock = 0;
+
+#if !defined(PC_DEVELOPMENT_TCP_PORT)
+#define PC_DEVELOPMENT_TCP_PORT 4405
+#endif
+
+static devoptab_t dotab_stdout =
 {
-	log_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-	if (log_socket < 0)
-		return;
+   "stdout_net",   /* device name */
+   0,              /* size of file structure */
+   NULL,           /* device open */
+   NULL,           /* device close */
+   wiiu_log_write, /* device write */
+   NULL,           /* ... */
+};
 
-	struct sockaddr_in connect_addr;
-	memset(&connect_addr, 0, sizeof(connect_addr));
-	connect_addr.sin_family = AF_INET;
-	connect_addr.sin_port = 4405;
-	inet_aton(ipString, &connect_addr.sin_addr);
+int main(int argc, char **argv)
+{
+   main_setup();
+   get_arguments(&argc, &argv);
 
-	if(connect(log_socket, (struct sockaddr*)&connect_addr, sizeof(connect_addr)) < 0)
-	{
-	    socketclose(log_socket);
-	    log_socket = -1;
-	}
+#ifdef IS_SALAMANDER
+   int salamander_main(int argc, char **argv);
+   salamander_main(argc, argv);
+#else
+   do_rarch_main(argc, argv);
+   main_loop();
+   main_exit(NULL);
+#endif /* IS_SALAMANDER */
+   main_teardown();
+
+   /* We always return 0 because if we don't, it can prevent loading a
+    * different RPX/ELF in HBL. */
+   return 0;
 }
 
-void log_deinit(void)
+static void get_arguments(int *argc, char ***argv)
 {
-    if(log_socket >= 0)
-    {
-        socketclose(log_socket);
-        log_socket = -1;
-    }
-}
-static int log_write(struct _reent *r, int fd, const char *ptr, size_t len)
-{
-   if(log_socket < 0)
-       return len;
-
-   while(log_lock)
-      OSSleepTicks(((248625000/4)) / 1000);
-   log_lock = 1;
-
-   int ret;
-   while (len > 0) {
-       int block = len < 1400 ? len : 1400; // take max 1400 bytes per UDP packet
-       ret = send(log_socket, ptr, block, 0);
-       if(ret < 0)
-           break;
-
-       len -= ret;
-       ptr += ret;
+   DEBUG_VAR(ARGV_PTR);
+   if(ARGV_PTR && ((u32)ARGV_PTR < 0x01000000))
+   {
+      struct
+      {
+         u32 magic;
+         u32 argc;
+         char *argv[3];
+      } *param = ARGV_PTR;
+      if(param->magic == ARGV_MAGIC)
+      {
+        *argc = param->argc;
+        *argv = param->argv;
+      }
+      ARGV_PTR = NULL;
    }
 
-   log_lock = 0;
-
-   return len;
-}
-void net_print(const char* str)
-{
-   log_write(NULL, 0, str, strlen(str));
-}
-
-static devoptab_t dotab_stdout = {
-   "stdout",   // device name
-   0,          // size of file structure
-   NULL,       // device open
-   NULL,       // device close
-   log_write,       // device write
-   NULL,       // device read
-   NULL,       // device seek
-   NULL,       // device fstat
-   NULL,       // device stat
-   NULL,       // device link
-   NULL,       // device unlink
-   NULL,       // device chdir
-   NULL,       // device rename
-   NULL,       // device mkdir
-   0,          // dirStateSize
-   NULL,       // device diropen_r
-   NULL,       // device dirreset_r
-   NULL,       // device dirnext_r
-   NULL,       // device dirclose_r
-   NULL,       // device statvfs_r
-   NULL,       // device ftrunctate_r
-   NULL,       // device fsync_r
-   NULL,       // deviceData;
-};
-
-int __entry_menu(int argc, char **argv)
-{
-   InitFunctionPointers();
-   socket_lib_init();
-   log_init("10.42.0.1");
-   devoptab_list[STD_OUT] = &dotab_stdout;
-   devoptab_list[STD_ERR] = &dotab_stdout;
-   memoryInitialize();
-   mount_sd_fat("sd");
-   setup_os_exceptions();
-//   InstallExceptionHandler();
-   VPADInit();
-   OSScreenInit();
-
-   verbosity_enable();
    DEBUG_VAR(argc);
-   DEBUG_STR(argv[0]);
-   DEBUG_STR(argv[1]);
+   DEBUG_VAR(argv[0]);
+   DEBUG_VAR(argv[1]);
+   fflush(stdout);
+}
+
+static void main_setup(void)
+{
+   setup_os_exceptions();
+   ProcUIInit(&SaveCallback);
+   init_network();
+   init_logging();
+   init_pad_libraries();
+   verbosity_enable();
+   fflush(stdout);
+}
+
+static void main_teardown(void)
+{
+   deinit_pad_libraries();
+   ProcUIShutdown();
+   deinit_logging();
+   deinit_network();
+}
+
+static void main_loop(void)
+{
+   unsigned sleep_ms = 0;
+   OSTime start_time;
+   int status;
+
+   do
+   {
+      if(video_driver_get_ptr(false))
+      {
+         start_time = OSGetSystemTime();
+         task_queue_wait(swap_is_pending, &start_time);
+      }
+      else
+         task_queue_wait(NULL, NULL);
+
+      status = runloop_iterate(&sleep_ms);
+
+      if(status == 1 && sleep_ms > 0)
+         usleep(sleep_ms);
+
+      if(status == -1)
+         break;
+   } while(true);
+}
+
+static void do_rarch_main(int argc, char **argv)
+{
 #if 0
    int argc_ = 2;
-   char* argv_[] = {"sd:/retroarch/retroarch.elf", "sd:/smb3.nes", NULL};
+   char *argv_[] = { WIIU_SD_PATH "retroarch/retroarch.elf",
+                     WIIU_SD_PATH "rom.sfc",
+                     NULL };
    rarch_main(argc_, argv_, NULL);
 #else
    rarch_main(argc, argv, NULL);
-#endif
-//   int frames = 0;
-   do
-   {
-      unsigned sleep_ms = 0;
-      int ret = runloop_iterate(&sleep_ms);
+#endif /* if 0 */
+}
 
-//      if (ret == 1 && sleep_ms > 0)
-//       retro_sleep(sleep_ms);
-      task_queue_ctl(TASK_QUEUE_CTL_CHECK, NULL);
-      if (ret == -1)
-       break;
+static void SaveCallback(void)
+{
+   OSSavesDone_ReadyToRelease();
+}
 
-   }while(1);
-//   }while(frames++ < 300);
+static bool swap_is_pending(void *start_time)
+{
+   uint32_t swap_count, flip_count;
+   OSTime last_flip, last_vsync;
 
-   main_exit(NULL);
+   GX2GetSwapStatus(&swap_count, &flip_count, &last_flip, &last_vsync);
+   return last_vsync < *(OSTime *)start_time;
+}
 
+static void init_network(void)
+{
+   ACInitialize();
+   ACConnect();
+#ifdef IS_SALAMANDER
+   socket_lib_init();
+#else
+   network_init();
+#endif /* IS_SALAMANDER */
+}
 
-   printf("Unmount SD\n");
-   unmount_sd_fat("sd");
-   printf("Release memory\n");
-   memoryRelease();
-   log_deinit();
+static void deinit_network(void)
+{
+   ACClose();
+   ACFinalize();
+}
+
+int getBroadcastAddress(ACIpAddress *broadcast)
+{
+   ACIpAddress myIp, mySubnet;
+   ACResult result;
+
+   if(broadcast == NULL)
+      return -1;
+
+   result = ACGetAssignedAddress(&myIp);
+   if(result < 0)
+      return -1;
+   result = ACGetAssignedSubnet(&mySubnet);
+   if(result < 0)
+      return -1;
+
+   *broadcast = myIp | (~mySubnet);
+   return 0;
+}
+
+static void init_logging(void)
+{
+   wiiu_log_init(PC_DEVELOPMENT_TCP_PORT);
+   devoptab_list[STD_OUT] = &dotab_stdout;
+   devoptab_list[STD_ERR] = &dotab_stdout;
+}
+
+static void deinit_logging(void)
+{
+   fflush(stdout);
+   fflush(stderr);
+
+   wiiu_log_deinit();
+}
+
+static int broadcast_init(int port)
+{
+   ACIpAddress broadcast_ip;
+   if(getBroadcastAddress(&broadcast_ip) < 0)
+      return -1;
+
+   memset(&broadcast, 0, sizeof(broadcast));
+   broadcast.sin_family = AF_INET;
+   broadcast.sin_port = htons(port);
+   broadcast.sin_addr.s_addr = htonl(broadcast_ip);
 
    return 0;
+}
+
+static void wiiu_log_init(int port)
+{
+   wiiu_log_lock = 0;
+
+   if(broadcast_init(port) < 0)
+      return;
+
+   wiiu_log_socket = socket(AF_INET, SOCK_DGRAM, 0);
+
+   if(wiiu_log_socket < 0)
+      return;
+
+   struct sockaddr_in connect_addr;
+   memset(&connect_addr, 0, sizeof(connect_addr));
+   connect_addr.sin_family = AF_INET;
+   connect_addr.sin_port = 0;
+   connect_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+
+   if( bind(wiiu_log_socket, (struct sockaddr *)&connect_addr, sizeof(connect_addr)) < 0)
+   {
+      socketclose(wiiu_log_socket);
+      wiiu_log_socket = -1;
+      return;
+   }
+}
+
+static void wiiu_log_deinit(void)
+{
+   if(wiiu_log_socket >= 0)
+   {
+      socketclose(wiiu_log_socket);
+      wiiu_log_socket = -1;
+   }
+}
+
+static void init_pad_libraries(void)
+{
+#ifndef IS_SALAMANDER
+   KPADInit();
+   WPADEnableURCC(true);
+   WPADEnableWiiRemote(true);
+#endif /* IS_SALAMANDER */
+}
+
+static void deinit_pad_libraries(void)
+{
+#ifndef IS_SALAMANDER
+   KPADShutdown();
+#endif /* IS_SALAMANDER */
+}
+
+/* logging routines */
+
+void net_print(const char *str)
+{
+   wiiu_log_write(NULL, 0, str, strlen(str));
+}
+
+void net_print_exp(const char *str)
+{
+   sendto(wiiu_log_socket, str, strlen(str), 0, (struct sockaddr *)&broadcast, sizeof(broadcast));
+}
+
+/* RFC 791 specifies that any IP host must be able to receive a datagram of 576 bytes.
+ * Since we're generally never logging more than a line or two's worth of data (~100 bytes)
+ * this is a reasonable size for our use. */
+#define DGRAM_SIZE 576
+
+static ssize_t wiiu_log_write(struct _reent *r, void *fd, const char *ptr, size_t len)
+{
+   if( wiiu_log_socket < 0)
+      return len;
+
+   while(wiiu_log_lock)
+      OSSleepTicks(((248625000 / 4)) / 1000);
+
+   wiiu_log_lock = 1;
+
+   int sent;
+   int remaining = len;
+
+   while(remaining > 0)
+   {
+      int block = remaining < DGRAM_SIZE ? remaining : DGRAM_SIZE;
+      sent = sendto(wiiu_log_socket, ptr, block, 0, (struct sockaddr *)&broadcast, sizeof(broadcast));
+
+      if(sent < 0)
+         break;
+
+      remaining -= sent;
+      ptr       += sent;
+   }
+
+   wiiu_log_lock = 0;
+
+   return len;
 }

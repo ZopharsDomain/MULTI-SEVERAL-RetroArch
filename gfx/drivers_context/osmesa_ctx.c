@@ -1,6 +1,6 @@
 /*  RetroArch - A frontend for libretro.
- *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
- *  Copyright (C) 2011-2016 - Daniel De Matteis
+ *  Copyright (C) 2011-2017 - Higor Euripedes
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -17,6 +17,7 @@
 
 #include <unistd.h>
 #include <errno.h>
+#include <stdlib.h>
 
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -25,9 +26,11 @@
 #include <sys/un.h>
 #include <poll.h>
 
+#include <compat/strl.h>
+
 #include <GL/osmesa.h>
 
-#include "../../runloop.h"
+#include "../../configuration.h"
 #include "../common/gl_common.h"
 
 #if (OSMESA_MAJOR_VERSION * 1000 + OSMESA_MINOR_VERSION) >= 11002
@@ -45,6 +48,8 @@ static int            g_osmesa_format  = OSMESA_RGBA;
 static int            g_osmesa_bpp     = 4;
 static const char    *g_osmesa_fifo    = "/tmp/osmesa-retroarch.sock";
 
+static enum gfx_ctx_api osmesa_api     = GFX_CTX_NONE;
+
 typedef struct gfx_osmesa_ctx_data
 {
    uint8_t *screen;
@@ -52,7 +57,6 @@ typedef struct gfx_osmesa_ctx_data
    int  height;
    int  pixsize;
 
-   int frame_count;
    OSMesaContext ctx;
    int socket;
    int client;
@@ -73,7 +77,7 @@ static void osmesa_fifo_open(gfx_ctx_osmesa_data_t *osmesa)
 
    saun.sun_family = AF_UNIX;
 
-   strcpy(saun.sun_path, g_osmesa_fifo);
+   strlcpy(saun.sun_path, g_osmesa_fifo, sizeof(saun.sun_path));
 
    unlink(g_osmesa_fifo);
 
@@ -138,7 +142,7 @@ static void osmesa_fifo_write(gfx_ctx_osmesa_data_t *osmesa)
    }
 }
 
-static void *osmesa_ctx_init(void *video_driver)
+static void *osmesa_ctx_init(video_frame_info_t *video_info, void *video_driver)
 {
 #ifdef HAVE_OSMESA_CREATE_CONTEXT_ATTRIBS
    const int attribs[] = {
@@ -207,12 +211,19 @@ static void osmesa_ctx_destroy(void *data)
    free(osmesa);
 }
 
-static bool osmesa_ctx_bind_api(void *data, enum gfx_ctx_api api, unsigned major,
-                             unsigned minor)
+static enum gfx_ctx_api osmesa_ctx_get_api(void *data)
+{
+   return osmesa_api;
+}
+
+static bool osmesa_ctx_bind_api(void *data,
+      enum gfx_ctx_api api, unsigned major,
+      unsigned minor)
 {
    if (api != GFX_CTX_OPENGL_API)
       return false;
 
+   osmesa_api       = api;
    g_osmesa_profile = OSMESA_COMPAT_PROFILE;
 
    if (major)
@@ -235,15 +246,14 @@ static void osmesa_ctx_swap_interval(void *data, unsigned interval)
    (void)interval;
 }
 
-static bool osmesa_ctx_set_video_mode(void *data, unsigned width, unsigned height,
+static bool osmesa_ctx_set_video_mode(void *data,
+      video_frame_info_t *video_info,
+      unsigned width, unsigned height,
       bool fullscreen)
 {
    gfx_ctx_osmesa_data_t *osmesa = (gfx_ctx_osmesa_data_t*)data;
-   uint8_t *screen = osmesa->screen;
-
-   (void)fullscreen;
-
-   bool size_changed = (width * height) != (osmesa->width * osmesa->height);
+   uint8_t               *screen = osmesa->screen;
+   bool             size_changed = (width * height) != (osmesa->width * osmesa->height);
 
    if (!osmesa->screen || size_changed)
       screen = (uint8_t*)calloc(1, (width * height) * osmesa->pixsize);
@@ -305,24 +315,9 @@ static void osmesa_ctx_get_video_size(void *data,
    *height = osmesa->height;
 }
 
-static void osmesa_ctx_update_window_title(void *data)
-{
-   static char buf[128]           = {0};
-   static char buf_fps[128]       = {0};
-   settings_t *settings    = config_get_ptr();
-   gfx_ctx_osmesa_data_t *osmesa = (gfx_ctx_osmesa_data_t*)data;
-
-   if (!osmesa)
-      return;
-
-   video_monitor_get_fps(buf, sizeof(buf), buf_fps, sizeof(buf_fps));
-
-   if (settings->fps_show)
-      runloop_msg_queue_push(buf_fps, 1, 1, false);
-}
-
-static void osmesa_ctx_check_window(void *data, bool *quit, bool *resize,unsigned *width,
-                            unsigned *height, unsigned frame_count)
+static void osmesa_ctx_check_window(void *data, bool *quit,
+      bool *resize,unsigned *width,
+      unsigned *height, bool is_shutdown)
 {
    gfx_ctx_osmesa_data_t *osmesa = (gfx_ctx_osmesa_data_t*)data;
 
@@ -330,15 +325,6 @@ static void osmesa_ctx_check_window(void *data, bool *quit, bool *resize,unsigne
    *height             = osmesa->height;
    *resize             = false;
    *quit               = false;
-   osmesa->frame_count = frame_count;
-}
-
-static bool osmesa_ctx_set_resize(void *data, unsigned width, unsigned height)
-{
-   (void)data;
-   (void)width;
-   (void)height;
-   return false;
 }
 
 static bool osmesa_ctx_has_focus(void *data)
@@ -360,7 +346,7 @@ static bool osmesa_ctx_has_windowed(void *data)
    return true;
 }
 
-static void osmesa_ctx_swap_buffers(void *data)
+static void osmesa_ctx_swap_buffers(void *data, void *data2)
 {
    gfx_ctx_osmesa_data_t *osmesa = (gfx_ctx_osmesa_data_t*)data;
    osmesa_fifo_accept(osmesa);
@@ -371,9 +357,10 @@ static void osmesa_ctx_swap_buffers(void *data)
 #endif
 }
 
-static void osmesa_ctx_input_driver(void *data, const input_driver_t **input, void **input_data)
+static void osmesa_ctx_input_driver(void *data,
+      const char *name,
+      const input_driver_t **input, void **input_data)
 {
-   (void)data;
    *input      = NULL;
    *input_data = NULL;
 }
@@ -406,18 +393,20 @@ const gfx_ctx_driver_t gfx_ctx_osmesa =
 {
    osmesa_ctx_init,
    osmesa_ctx_destroy,
+   osmesa_ctx_get_api,
    osmesa_ctx_bind_api,
    osmesa_ctx_swap_interval,
    osmesa_ctx_set_video_mode,
    osmesa_ctx_get_video_size,
+   NULL, /* get_refresh_rate */
    NULL, /* get_video_output_size */
    NULL, /* get_video_output_prev */
    NULL, /* get_video_output_next */
    NULL, /* get_metrics */
    NULL, /* translate_aspect */
-   osmesa_ctx_update_window_title,
+   NULL, /* update_title */
    osmesa_ctx_check_window,
-   osmesa_ctx_set_resize,
+   NULL, /* set_resize */
    osmesa_ctx_has_focus,
    osmesa_ctx_suppress_screensaver,
    osmesa_ctx_has_windowed,

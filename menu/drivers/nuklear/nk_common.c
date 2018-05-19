@@ -1,7 +1,7 @@
 /*  RetroArch - A frontend for libretro.
- *  Copyright (C) 2011-2016 - Daniel De Matteis
- *  Copyright (C) 2014-2015 - Jean-Andr� Santoni
- *  Copyright (C) 2016      - Andr�s Su�rez
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
+ *  Copyright (C) 2014-2017 - Jean-Andr� Santoni
+ *  Copyright (C) 2016-2017 - Andr�s Su�rez
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -29,8 +29,8 @@
 
 #include "nk_common.h"
 
-#include "../../menu_display.h"
-#include "../../../gfx/video_shader_driver.h"
+#include "../../menu_driver.h"
+#include "../../../gfx/video_driver.h"
 
 #ifdef HAVE_GLSL
 #include "../../../gfx/drivers/gl_shaders/pipeline_nuklear.glsl.vert.h"
@@ -43,27 +43,32 @@ struct nk_user_font usrfnt;
 struct nk_allocator nk_alloc;
 struct nk_device device;
 
+struct nk_vertex {
+   float position[2];
+   float uv[2];
+   nk_byte col[4];
+};
+
 struct nk_image nk_common_image_load(const char *filename)
 {
     int x,y,n;
-    GLuint tex;
-    unsigned char *data = stbi_load(filename, &x, &y, &n, 0);
+    struct texture_image ti;
+    uintptr_t tex;
 
-    if (!data)
+    ti.width         = 0;
+    ti.height        = 0;
+    ti.pixels        = NULL;
+    ti.supports_rgba = video_driver_supports_rgba();
+
+    image_texture_load(&ti, filename);
+
+    if (!ti.pixels)
        printf("Failed to load image: %s\n", filename);
 
-#if defined(HAVE_OPENGL) || defined(HAVE_OPENGLES)
-    glGenTextures(1, &tex);
-    glBindTexture(GL_TEXTURE_2D, tex);
-    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_NEAREST);
-    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR_MIPMAP_NEAREST);
-    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, x, y, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
-    glGenerateMipmap(GL_TEXTURE_2D);
-#endif
+    video_driver_texture_load(&ti, TEXTURE_FILTER_MIPMAP_NEAREST, &tex);
 
-    stbi_image_free(data);
+    image_texture_free(&ti);
+
     return nk_image_id((int)tex);
 }
 
@@ -80,9 +85,16 @@ void nk_common_device_init(struct nk_device *dev)
 #if defined(HAVE_OPENGL) || defined(HAVE_OPENGLES)
    GLint status;
 
+   /* buffer setup */
+   GLsizei vs = sizeof(struct nk_vertex);
+   size_t vp = offsetof(struct nk_vertex, position);
+   size_t vt = offsetof(struct nk_vertex, uv);
+   size_t vc = offsetof(struct nk_vertex, col);
+
    dev->prog      = glCreateProgram();
    dev->vert_shdr = glCreateShader(GL_VERTEX_SHADER);
    dev->frag_shdr = glCreateShader(GL_FRAGMENT_SHADER);
+
    glShaderSource(dev->vert_shdr, 1, &nuklear_vertex_shader, 0);
    glShaderSource(dev->frag_shdr, 1, &nuklear_fragment_shader, 0);
    glCompileShader(dev->vert_shdr);
@@ -99,29 +111,21 @@ void nk_common_device_init(struct nk_device *dev)
    dev->attrib_uv    = glGetAttribLocation(dev->prog, "TexCoord");
    dev->attrib_col   = glGetAttribLocation(dev->prog, "Color");
 
-   {
-      /* buffer setup */
-      GLsizei vs = sizeof(struct nk_draw_vertex);
-      size_t vp = offsetof(struct nk_draw_vertex, position);
-      size_t vt = offsetof(struct nk_draw_vertex, uv);
-      size_t vc = offsetof(struct nk_draw_vertex, col);
+   glGenBuffers(1, &dev->vbo);
+   glGenBuffers(1, &dev->ebo);
+   glGenVertexArrays(1, &dev->vao);
 
-      glGenBuffers(1, &dev->vbo);
-      glGenBuffers(1, &dev->ebo);
-      glGenVertexArrays(1, &dev->vao);
+   glBindVertexArray(dev->vao);
+   glBindBuffer(GL_ARRAY_BUFFER, dev->vbo);
+   glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, dev->ebo);
 
-      glBindVertexArray(dev->vao);
-      glBindBuffer(GL_ARRAY_BUFFER, dev->vbo);
-      glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, dev->ebo);
+   glEnableVertexAttribArray((GLuint)dev->attrib_pos);
+   glEnableVertexAttribArray((GLuint)dev->attrib_uv);
+   glEnableVertexAttribArray((GLuint)dev->attrib_col);
 
-      glEnableVertexAttribArray((GLuint)dev->attrib_pos);
-      glEnableVertexAttribArray((GLuint)dev->attrib_uv);
-      glEnableVertexAttribArray((GLuint)dev->attrib_col);
-
-      glVertexAttribPointer((GLuint)dev->attrib_pos, 2, GL_FLOAT, GL_FALSE, vs, (void*)vp);
-      glVertexAttribPointer((GLuint)dev->attrib_uv, 2, GL_FLOAT, GL_FALSE, vs, (void*)vt);
-      glVertexAttribPointer((GLuint)dev->attrib_col, 4, GL_UNSIGNED_BYTE, GL_TRUE, vs, (void*)vc);
-   }
+   glVertexAttribPointer((GLuint)dev->attrib_pos, 2, GL_FLOAT, GL_FALSE, vs, (void*)vp);
+   glVertexAttribPointer((GLuint)dev->attrib_uv, 2, GL_FLOAT, GL_FALSE, vs, (void*)vt);
+   glVertexAttribPointer((GLuint)dev->attrib_col, 4, GL_UNSIGNED_BYTE, GL_TRUE, vs, (void*)vc);
 
    glBindTexture(GL_TEXTURE_2D, 0);
    glBindBuffer(GL_ARRAY_BUFFER, 0);
@@ -130,7 +134,7 @@ void nk_common_device_init(struct nk_device *dev)
 #endif
 }
 
-void device_upload_atlas(struct nk_device *dev, const void *image, int width, int height)
+void nk_upload_atlas(struct nk_device *dev, const void *image, int width, int height)
 {
     glGenTextures(1, &dev->font_tex);
     glBindTexture(GL_TEXTURE_2D, dev->font_tex);
@@ -166,6 +170,14 @@ void nk_common_device_draw(struct nk_device *dev,
    void                    *vertices = NULL;
    void                    *elements = NULL;
    const nk_draw_index       *offset = NULL;
+   const struct nk_draw_vertex_layout_element vertex_layout[] =
+   {
+      {NK_VERTEX_POSITION, NK_FORMAT_FLOAT, NK_OFFSETOF(struct nk_vertex, position)},
+      {NK_VERTEX_TEXCOORD, NK_FORMAT_FLOAT, NK_OFFSETOF(struct nk_vertex, uv)},
+      {NK_VERTEX_COLOR, NK_FORMAT_R8G8B8A8, NK_OFFSETOF(struct nk_vertex, col)},
+      {NK_VERTEX_LAYOUT_END}
+   };
+
 #if defined(HAVE_OPENGL) || defined(HAVE_OPENGLES)
    GLint last_tex;
    GLint last_ebo, last_vbo, last_vao;
@@ -184,9 +196,11 @@ void nk_common_device_draw(struct nk_device *dev,
    glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &last_vao);
    glGetIntegerv(GL_ELEMENT_ARRAY_BUFFER_BINDING, &last_ebo);
    glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &last_vbo);
+   glEnable(GL_SCISSOR_TEST);
 #endif
 
    menu_display_blend_begin();
+
 
 #if defined(HAVE_OPENGL) || defined(HAVE_OPENGLES)
    glActiveTexture(GL_TEXTURE0);
@@ -196,7 +210,7 @@ void nk_common_device_draw(struct nk_device *dev,
    shader_info.data       = NULL;
    shader_info.idx        = dev->prog;
    shader_info.set_active = false;
-   video_shader_driver_use(&shader_info);
+   video_shader_driver_use(shader_info);
 
 #if defined(HAVE_OPENGL) || defined(HAVE_OPENGLES)
    glUniformMatrix4fv(dev->uniform_proj, 1, GL_FALSE, &ortho[0][0]);
@@ -217,12 +231,19 @@ void nk_common_device_draw(struct nk_device *dev,
 #endif
 
    /* fill converting configuration */
-   memset(&config, 0, sizeof(config));
 
-   config.global_alpha         = 1.0f;
-   config.shape_AA             = AA;
-   config.line_AA              = AA;
+   NK_MEMSET(&config, 0, sizeof(config));
+   config.vertex_layout = vertex_layout;
+   config.vertex_size  = sizeof(struct nk_vertex);
+   config.vertex_alignment = NK_ALIGNOF(struct nk_vertex);
+   config.null = dev->null;
    config.circle_segment_count = 22;
+   config.curve_segment_count = 22;
+   config.arc_segment_count = 22;
+   config.global_alpha = 1.0f;
+   config.shape_AA = AA;
+   config.line_AA = AA;
+
 #if 0
    config.line_thickness       = 1.0f;
 #endif
@@ -248,7 +269,8 @@ void nk_common_device_draw(struct nk_device *dev,
       glBindTexture(GL_TEXTURE_2D, (GLuint)cmd->texture.id);
       glScissor((GLint)cmd->clip_rect.x,
             height - (GLint)(cmd->clip_rect.y + cmd->clip_rect.h),
-            (GLint)cmd->clip_rect.w, (GLint)cmd->clip_rect.h);
+            (GLint)cmd->clip_rect.w,
+            (GLint)cmd->clip_rect.h);
       glDrawElements(GL_TRIANGLES, (GLsizei)cmd->elem_count,
             GL_UNSIGNED_SHORT, offset);
 #endif
@@ -261,13 +283,14 @@ void nk_common_device_draw(struct nk_device *dev,
    shader_info.data       = NULL;
    shader_info.idx        = (GLint)last_prog;
    shader_info.set_active = false;
-   video_shader_driver_use(&shader_info);
+   video_shader_driver_use(shader_info);
 
 #if defined(HAVE_OPENGL) || defined(HAVE_OPENGLES)
    glBindTexture(GL_TEXTURE_2D, (GLuint)last_tex);
    glBindBuffer(GL_ARRAY_BUFFER, (GLuint)last_vbo);
    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, (GLuint)last_ebo);
    glBindVertexArray((GLuint)last_vao);
+   glDisable(GL_SCISSOR_TEST);
 #endif
 
    menu_display_blend_end();

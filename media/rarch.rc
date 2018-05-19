@@ -4,19 +4,15 @@
 #include "../ui/drivers/ui_win32_resource.h"
 #include <windows.h>
 
-
-
-
-//
 // Menu resources
 //
-LANGUAGE 0, SUBLANG_NEUTRAL
+LANGUAGE LANG_ENGLISH, SUBLANG_NEUTRAL
 IDR_MENU MENU
 {
     POPUP "File"
     {
-        MENUITEM "Load Core", ID_M_LOAD_CORE
-        MENUITEM "Load Content", ID_M_LOAD_CONTENT
+        MENUITEM "Load Core...", ID_M_LOAD_CORE
+        MENUITEM "Load Content...", ID_M_LOAD_CONTENT
         MENUITEM SEPARATOR
         MENUITEM "Close", ID_M_QUIT
     }
@@ -73,7 +69,8 @@ IDR_MENU MENU
             MENUITEM "10x", ID_M_WINDOW_SCALE_10X
         }
         MENUITEM "Toggle Exclusive Full Screen", ID_M_FULL_SCREEN
-        MENUITEM "Shader Parameters", ID_M_SHADER_PARAMETERS
+        // Shader dialog is disabled for now, until video_threaded issues are fixed.
+        //MENUITEM "Shader Parameters", ID_M_SHADER_PARAMETERS
     }
 }
 
@@ -82,15 +79,15 @@ IDR_MENU MENU
 //
 // Dialog resources
 //
-LANGUAGE 0, SUBLANG_NEUTRAL
+LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
 IDD_PICKCORE DIALOG 0, 0, 225, 118
 STYLE DS_3DLOOK | DS_CENTER | DS_MODALFRAME | DS_SHELLFONT | WS_CAPTION | WS_VISIBLE | WS_POPUP | WS_SYSMENU
 CAPTION "Pick Core"
 FONT 8, "Ms Shell Dlg"
 {
-    PUSHBUTTON      "Cancel", IDCANCEL, 170, 32, 50, 14, 0, WS_EX_LEFT
-    DEFPUSHBUTTON   "OK", IDOK, 170, 15, 50, 14, 0, WS_EX_LEFT
     LISTBOX         ID_CORELISTBOX, 5, 55, 214, 60, WS_TABSTOP | WS_VSCROLL | LBS_NOINTEGRALHEIGHT | LBS_SORT | LBS_NOTIFY, WS_EX_LEFT
+    DEFPUSHBUTTON   "OK", IDOK, 170, 15, 50, 14, 0, WS_EX_LEFT
+    PUSHBUTTON      "Cancel", IDCANCEL, 170, 32, 50, 14, 0, WS_EX_LEFT
     LTEXT           "Please select a core to use for the content loaded.\nOtherwise, press 'Cancel' to cancel loading.", 0, 9, 12, 160, 17, SS_LEFT, WS_EX_LEFT
 }
 
@@ -99,13 +96,15 @@ FONT 8, "Ms Shell Dlg"
 //
 // Icon resources
 //
-LANGUAGE 0, SUBLANG_NEUTRAL
-1                  ICON           "icon_light.ico"
+LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
+1                  ICON           "retroarch.ico"
 
 
 
 //
 // Manifest resources
 //
-LANGUAGE 0, SUBLANG_NEUTRAL
+LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
 2                  RT_MANIFEST    "rarch.manifest"
+
+#include "rarch_ja.rc"

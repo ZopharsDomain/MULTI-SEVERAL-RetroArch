@@ -1,6 +1,6 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
- *  Copyright (C) 2011-2016 - Daniel De Matteis
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -21,28 +21,41 @@
 #include <compat/strl.h>
 
 #include <retro_common_api.h>
-
 #include <libretro.h>
 
 RETRO_BEGIN_DECLS
 
-/* Send input code to menu for one frame.
+/*
+ * This function gets called in order to process all input events
+ * for the current frame.
  *
- * TODO/FIXME - needs to be overhauled so we can send multiple
+ * Sends input code to menu for one frame.
+ *
+ * It uses as input the local variables' input' and 'trigger_input'.
+ *
+ * Mouse and touch input events get processed inside this function.
+ *
+ * NOTE: 'input' and 'trigger_input' is sourced from the keyboard and/or
+ * the gamepad. It does not contain input state derived from the mouse
+ * and/or touch - this gets dealt with separately within this function.
+ *
+ * TODO/FIXME - maybe needs to be overhauled so we can send multiple
  * events per frame if we want to, and we shouldn't send the
  * entire button state either but do a separate event per button
  * state.
  */
-unsigned menu_event(uint64_t input, uint64_t trigger_state);
+unsigned menu_event(input_bits_t *p_input, input_bits_t *p_trigger_state);
 
-void menu_event_keyboard_set(bool down, enum retro_key key);
+/* Set a specific keyboard key.
+ *
+ * 'down' sets the latch (true would
+ * mean the key is being pressed down, while 'false' would mean that
+ * the key has been released).
+ **/
+void menu_event_kb_set(bool down, enum retro_key key);
 
-unsigned char menu_event_keyboard_is_set(enum retro_key key);
-
-int menu_event_get_osk_ptr();
-void menu_event_set_osk_ptr(int);
-void menu_event_osk_append(int);
-const char** menu_event_get_osk_grid();
+/* Check if a specific keyboard key has been pressed. */
+unsigned char menu_event_kb_is_set(enum retro_key key);
 
 RETRO_END_DECLS
 

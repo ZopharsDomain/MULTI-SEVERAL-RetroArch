@@ -1,5 +1,5 @@
 /*  RetroArch - A frontend for libretro.
- *  Copyright (C) 2011-2016 - Daniel De Matteis
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -16,7 +16,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef __FreeBSD__
+#include <libusb.h>
+#else
 #include <libusb-1.0/libusb.h>
+#endif
 
 #include <rthreads/rthreads.h>
 #include <compat/strl.h>
@@ -25,10 +29,8 @@
 
 #include "../connect/joypad_connection.h"
 #include "../input_defines.h"
-#include "../input_autodetect.h"
-#include "../input_config.h"
+#include "../../tasks/tasks_internal.h"
 #include "../input_driver.h"
-#include "../input_hid_driver.h"
 #include "../../verbosity.h"
 
 #ifndef LIBUSB_CAP_HAS_HOTPLUG
@@ -40,7 +42,12 @@ typedef struct libusb_hid
    libusb_context *ctx;
    joypad_connection_t *slots;
    sthread_t *poll_thread;
+   int can_hotplug;
+#if defined(__FreeBSD__) && LIBUSB_API_VERSION <= 0x01000102
+   libusb_hotplug_callback_handle hp;
+#else
    int hp; /* libusb_hotplug_callback_handle is just int */
+#endif
    int quit;
 } libusb_hid_t;
 
@@ -87,13 +94,13 @@ static void adapter_thread(void *data)
       int size = 0;
 
       slock_lock(adapter->send_control_lock);
-      if (fifo_read_avail(adapter->send_control_buffer) 
+      if (fifo_read_avail(adapter->send_control_buffer)
             >= sizeof(send_command_size))
       {
          fifo_read(adapter->send_control_buffer,
                &send_command_size, sizeof(send_command_size));
 
-         if (fifo_read_avail(adapter->send_control_buffer) 
+         if (fifo_read_avail(adapter->send_control_buffer)
                >= sizeof(send_command_size))
          {
             fifo_read(adapter->send_control_buffer,
@@ -141,16 +148,15 @@ static void libusb_hid_device_add_autodetect(unsigned idx,
       const char *device_name, const char *driver_name,
       uint16_t dev_vid, uint16_t dev_pid)
 {
-   autoconfig_params_t params = {{0}};
-
-   params.idx = idx;
-   params.vid = dev_vid;
-   params.pid = dev_pid;
-
-   strlcpy(params.name, device_name, sizeof(params.name));
-   strlcpy(params.driver, driver_name, sizeof(params.driver));
-
-   input_config_autoconfigure_joypad(&params);
+   if (!input_autoconfigure_connect(
+         device_name,
+         NULL,
+         driver_name,
+         idx,
+         dev_vid,
+         dev_pid
+         ))
+      input_config_set_device_name(idx, device_name);
 }
 
 static void libusb_get_description(struct libusb_device *device,
@@ -160,7 +166,13 @@ static void libusb_get_description(struct libusb_device *device,
    unsigned i, k;
    struct libusb_config_descriptor *config;
 
-   libusb_get_config_descriptor(device, 0, &config);
+   int desc_ret = libusb_get_config_descriptor(device, 0, &config);
+
+   if (desc_ret != 0)
+   {
+      RARCH_ERR("Error %d getting libusb config descriptor\n", desc_ret);
+      return;
+   }
 
    for (i = 0; i < (int)config->bNumInterfaces; i++)
    {
@@ -168,7 +180,7 @@ static void libusb_get_description(struct libusb_device *device,
 
       for(j = 0; j < inter->num_altsetting; j++)
       {
-         const struct libusb_interface_descriptor *interdesc = 
+         const struct libusb_interface_descriptor *interdesc =
             &inter->altsetting[j];
 
 #if 0
@@ -179,13 +191,13 @@ static void libusb_get_description(struct libusb_device *device,
 
             for(k = 0; k < (int)interdesc->bNumEndpoints; k++)
             {
-               const struct libusb_endpoint_descriptor *epdesc = 
+               const struct libusb_endpoint_descriptor *epdesc =
                   &interdesc->endpoint[k];
-               bool is_int = (epdesc->bmAttributes & LIBUSB_TRANSFER_TYPE_MASK) 
+               bool is_int = (epdesc->bmAttributes & LIBUSB_TRANSFER_TYPE_MASK)
                   == LIBUSB_TRANSFER_TYPE_INTERRUPT;
-               bool is_out = (epdesc->bEndpointAddress & LIBUSB_ENDPOINT_DIR_MASK) 
+               bool is_out = (epdesc->bEndpointAddress & LIBUSB_ENDPOINT_DIR_MASK)
                   == LIBUSB_ENDPOINT_OUT;
-               bool is_in = (epdesc->bEndpointAddress & LIBUSB_ENDPOINT_DIR_MASK) 
+               bool is_in = (epdesc->bEndpointAddress & LIBUSB_ENDPOINT_DIR_MASK)
                   == LIBUSB_ENDPOINT_IN;
 
                if (is_int)
@@ -203,11 +215,12 @@ static void libusb_get_description(struct libusb_device *device,
                }
             }
          }
+
          goto ret;
       }
    }
 
-   ret:
+ret:
    libusb_free_config_descriptor(config);
 }
 
@@ -295,14 +308,15 @@ static int add_adapter(void *data, struct libusb_device *dev)
 
    adapter->slot = pad_connection_pad_init(hid->slots,
          device_name, desc.idVendor, desc.idProduct,
-         adapter, &libusb_hid_device_send_control);
+         adapter, &libusb_hid);
 
    if (adapter->slot == -1)
       goto error;
 
    if (!pad_connection_has_interface(hid->slots, adapter->slot))
    {
-      RARCH_ERR(" Interface not found (%s).\n", adapter->name);
+      RARCH_ERR("Interface not found (%s) (VID/PID: %04x:%04x).\n",
+         adapter->name, desc.idVendor, desc.idProduct);
       goto error;
    }
 
@@ -367,9 +381,9 @@ static int remove_adapter(void *data, struct libusb_device *dev)
    if (adapter->next->device == dev)
    {
       struct libusb_adapter *new_next = NULL;
-      const char *name = (const char*)adapter->next->name;
+      const char                *name = (const char*)adapter->next->name;
 
-      input_config_autoconfigure_disconnect(adapter->slot, name);
+      input_autoconfigure_disconnect(adapter->slot, name);
 
       adapter->next->quitting = true;
       sthread_join(adapter->next->thread);
@@ -429,21 +443,24 @@ static const char *libusb_hid_joypad_name(void *data, unsigned pad)
    return NULL;
 }
 
-static uint64_t libusb_hid_joypad_get_buttons(void *data, unsigned port)
+static void libusb_hid_joypad_get_buttons(void *data, unsigned port,
+      input_bits_t *state)
 {
    libusb_hid_t        *hid   = (libusb_hid_t*)data;
    if (hid)
-      return pad_connection_get_buttons(&hid->slots[port], port);
-   return 0;
+   {
+      pad_connection_get_buttons(&hid->slots[port], port, state);
+      return;
+   }
+
+   BIT256_CLEAR_ALL_PTR(state);
 }
 
 static bool libusb_hid_joypad_button(void *data,
       unsigned port, uint16_t joykey)
 {
-   uint64_t buttons          = libusb_hid_joypad_get_buttons(data, port);
-
-   if (joykey == NO_BTN)
-      return false;
+   input_bits_t buttons;
+   libusb_hid_joypad_get_buttons(data, port, &buttons);
 
    /* Check hat. */
    if (GET_HAT_DIR(joykey))
@@ -451,7 +468,7 @@ static bool libusb_hid_joypad_button(void *data,
 
    /* Check the button. */
    if ((port < MAX_USERS) && (joykey < 32))
-      return ((buttons & (1 << joykey)) != 0);
+      return (BIT256_GET(buttons, joykey) != 0);
    return false;
 }
 
@@ -493,7 +510,7 @@ static int16_t libusb_hid_joypad_axis(void *data,
    return val;
 }
 
-static void libusb_hid_free(void *data)
+static void libusb_hid_free(const void *data)
 {
    libusb_hid_t *hid = (libusb_hid_t*)data;
 
@@ -508,9 +525,11 @@ static void libusb_hid_free(void *data)
       sthread_join(hid->poll_thread);
    }
 
-   pad_connection_destroy(hid->slots);
+   if (hid->slots)
+      pad_connection_destroy(hid->slots);
 
-   libusb_hotplug_deregister_callback(hid->ctx, hid->hp);
+   if (hid->can_hotplug)
+      libusb_hotplug_deregister_callback(hid->ctx, hid->hp);
 
    libusb_exit(hid->ctx);
    free(hid);
@@ -543,8 +562,22 @@ static void *libusb_hid_init(void)
    if (ret < 0)
       goto error;
 
-   if (!libusb_has_capability(LIBUSB_CAP_HAS_HOTPLUG))
-      goto error;
+#if LIBUSB_API_VERSION <= 0x01000102
+   /* API is too old, so libusb_has_capability function does not exist.
+    * Since we can't be sure, we assume for now there might be hot-plugging
+    * capability and continue on until we're told otherwise.
+    */
+   hid->can_hotplug = 1;
+#else
+   /* Ask libusb if it supports hotplug and store the result.
+    * Note: On Windows this will probably be false, see:
+    *  https://github.com/libusb/libusb/issues/86
+    */
+   if (libusb_has_capability(LIBUSB_CAP_HAS_HOTPLUG))
+      hid->can_hotplug = 1;
+   else
+      hid->can_hotplug = 0;
+#endif
 
    hid->slots = pad_connection_init(MAX_USERS);
 
@@ -565,22 +598,29 @@ static void *libusb_hid_init(void)
    if (count > 0)
       libusb_free_device_list(devices, 1);
 
-   ret = libusb_hotplug_register_callback(
-         hid->ctx,
-         (libusb_hotplug_event)(LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED |
-         LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT),
-         (libusb_hotplug_flag)LIBUSB_HOTPLUG_ENUMERATE,
-         LIBUSB_HOTPLUG_MATCH_ANY,
-         LIBUSB_HOTPLUG_MATCH_ANY,
-         LIBUSB_HOTPLUG_MATCH_ANY,
-         libusb_hid_hotplug_callback,
-         hid,
-         &hid->hp);
-
-   if (ret != LIBUSB_SUCCESS)
+   if (hid->can_hotplug)
    {
-      RARCH_ERR("Error creating a hotplug callback.\n");
-      goto error;
+      ret = libusb_hotplug_register_callback(
+            hid->ctx,
+            (libusb_hotplug_event)(LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED |
+            LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT),
+            (libusb_hotplug_flag)LIBUSB_HOTPLUG_ENUMERATE,
+            LIBUSB_HOTPLUG_MATCH_ANY,
+            LIBUSB_HOTPLUG_MATCH_ANY,
+            LIBUSB_HOTPLUG_MATCH_ANY,
+            libusb_hid_hotplug_callback,
+            hid,
+            &hid->hp);
+
+      if (ret != LIBUSB_SUCCESS)
+      {
+         /* Creating the hotplug callback has failed. We assume libusb
+          * is still okay to continue and just update our knowledge of
+          * the situation accordingly.
+          */
+         RARCH_WARN("[libusb] Failed to create a hotplug callback.\n");
+         hid->can_hotplug = 0;
+      }
    }
 
    hid->poll_thread = sthread_create(poll_thread, hid);
@@ -616,4 +656,5 @@ hid_driver_t libusb_hid = {
    libusb_hid_joypad_rumble,
    libusb_hid_joypad_name,
    "libusb",
+   libusb_hid_device_send_control,
 };

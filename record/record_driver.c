@@ -1,6 +1,6 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
- *  Copyright (C) 2011-2016 - Daniel De Matteis
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -19,6 +19,7 @@
 #include <file/file_path.h>
 #include <compat/strl.h>
 #include <string/stdstring.h>
+#include <retro_math.h>
 
 #ifdef HAVE_CONFIG_H
 #include "../config.h"
@@ -29,8 +30,8 @@
 #include "../command.h"
 #include "../configuration.h"
 #include "../driver.h"
+#include "../gfx/video_driver.h"
 #include "../retroarch.h"
-#include "../runloop.h"
 #include "../verbosity.h"
 #include "../msg_hash.h"
 #include "../list_special.h"
@@ -52,7 +53,7 @@ static bool recording_enable                   = false;
 static bool recording_use_output_dir           = false;
 
 static const record_driver_t *recording_driver = NULL;
-static void *recording_data                    = NULL;
+void *recording_data                           = NULL;
 
 /**
  * record_driver_find_ident:
@@ -103,24 +104,27 @@ void find_record_driver(void)
    settings_t *settings = config_get_ptr();
 
    drv.label = "record_driver";
-   drv.s     = settings->record.driver;
+   drv.s     = settings->arrays.record_driver;
 
    driver_ctl(RARCH_DRIVER_CTL_FIND_INDEX, &drv);
 
-   i = drv.len;
+   i = (int)drv.len;
 
    if (i >= 0)
       recording_driver = (const record_driver_t*)record_driver_find_handle(i);
    else
    {
-      unsigned d;
+      if (verbosity_is_enabled())
+      {
+         unsigned d;
 
-      RARCH_ERR("Couldn't find any record driver named \"%s\"\n",
-            settings->audio.driver);
-      RARCH_LOG_OUTPUT("Available record drivers are:\n");
-      for (d = 0; record_driver_find_handle(d); d++)
-         RARCH_LOG_OUTPUT("\t%s\n", record_driver_find_ident(d));
-      RARCH_WARN("Going to default to first record driver...\n");
+         RARCH_ERR("Couldn't find any record driver named \"%s\"\n",
+               settings->arrays.record_driver);
+         RARCH_LOG_OUTPUT("Available record drivers are:\n");
+         for (d = 0; record_driver_find_handle(d); d++)
+            RARCH_LOG_OUTPUT("\t%s\n", record_driver_find_ident(d));
+         RARCH_WARN("Going to default to first record driver...\n");
+      }
 
       recording_driver = (const record_driver_t*)record_driver_find_handle(0);
 
@@ -183,22 +187,31 @@ bool record_driver_init_first(const record_driver_t **backend, void **data,
 }
 
 void recording_dump_frame(const void *data, unsigned width,
-      unsigned height, size_t pitch)
+      unsigned height, size_t pitch, bool is_idle)
 {
-   struct ffemu_video_data ffemu_data = {0};
+   bool has_gpu_record = false;
+   uint8_t *gpu_buf    = NULL;
+   struct ffemu_video_data
+      ffemu_data       = {0};
 
-   if (!recording_data)
-      return;
+   video_driver_get_record_status(&has_gpu_record,
+         &gpu_buf);
 
-   ffemu_data.pitch   = pitch;
-   ffemu_data.width   = width;
-   ffemu_data.height  = height;
-   ffemu_data.data    = data;
+   ffemu_data.pitch    = (int)pitch;
+   ffemu_data.width    = width;
+   ffemu_data.height   = height;
+   ffemu_data.data     = data;
 
-   if (video_driver_has_gpu_record())
+   if (has_gpu_record)
    {
-      uint8_t *gpu_buf         = NULL;
-      struct video_viewport vp = {0};
+      struct video_viewport vp;
+
+      vp.x                        = 0;
+      vp.y                        = 0;
+      vp.width                    = 0;
+      vp.height                   = 0;
+      vp.full_width               = 0;
+      vp.full_height              = 0;
 
       video_driver_get_viewport_info(&vp);
 
@@ -208,7 +221,7 @@ void recording_dump_frame(const void *data, unsigned width,
                msg_hash_to_str(MSG_VIEWPORT_SIZE_CALCULATION_FAILED));
          command_event(CMD_EVENT_GPU_RECORD_DEINIT, NULL);
 
-         recording_dump_frame(data, width, height, pitch);
+         recording_dump_frame(data, width, height, pitch, is_idle);
          return;
       }
 
@@ -225,25 +238,24 @@ void recording_dump_frame(const void *data, unsigned width,
          return;
       }
 
-      gpu_buf = video_driver_get_gpu_record();
       if (!gpu_buf)
          return;
 
       /* Big bottleneck.
        * Since we might need to do read-backs asynchronously,
        * it might take 3-4 times before this returns true. */
-      if (!video_driver_read_viewport(gpu_buf))
+      if (!video_driver_read_viewport(gpu_buf, is_idle))
          return;
 
-      ffemu_data.pitch  = recording_gpu_width * 3;
-      ffemu_data.width  = recording_gpu_width;
-      ffemu_data.height = recording_gpu_height;
+      ffemu_data.pitch  = (int)(recording_gpu_width * 3);
+      ffemu_data.width  = (unsigned)recording_gpu_width;
+      ffemu_data.height = (unsigned)recording_gpu_height;
       ffemu_data.data   = gpu_buf + (ffemu_data.height - 1) * ffemu_data.pitch;
 
       ffemu_data.pitch  = -ffemu_data.pitch;
    }
 
-   if (!video_driver_has_gpu_record())
+   if (!has_gpu_record)
       ffemu_data.is_dupe = !data;
 
    if (recording_driver && recording_driver->push_video)
@@ -283,9 +295,6 @@ void recording_push_audio(const int16_t *data, size_t samples)
 {
    struct ffemu_audio_data ffemu_data;
 
-   if (!recording_data)
-      return;
-
    ffemu_data.data                    = data;
    ffemu_data.frames                  = samples / 2;
 
@@ -321,7 +330,7 @@ bool recording_init(void)
       return false;
    }
 
-   if (!settings->video.gpu_record 
+   if (!settings->bools.video_gpu_record
          && video_driver_is_hw_context())
    {
       RARCH_WARN("%s.\n",
@@ -352,14 +361,21 @@ bool recording_init(void)
    params.pix_fmt    = (video_driver_get_pixel_format() == RETRO_PIXEL_FORMAT_XRGB8888) ?
       FFEMU_PIX_ARGB8888 : FFEMU_PIX_RGB565;
    params.config     = NULL;
-   
-   if (*global->record.config)
+
+   if (!string_is_empty(global->record.config))
       params.config = global->record.config;
 
    if (video_driver_supports_recording())
    {
       unsigned gpu_size;
-      struct video_viewport vp = {0};
+      struct video_viewport vp;
+
+      vp.x                        = 0;
+      vp.y                        = 0;
+      vp.width                    = 0;
+      vp.height                   = 0;
+      vp.full_width               = 0;
+      vp.full_height              = 0;
 
       video_driver_get_viewport_info(&vp);
 
@@ -375,7 +391,7 @@ bool recording_init(void)
       params.fb_width   = next_pow2(vp.width);
       params.fb_height  = next_pow2(vp.height);
 
-      if (settings->video.force_aspect &&
+      if (settings->bools.video_force_aspect &&
             (video_driver_get_aspect_ratio() > 0.0f))
          params.aspect_ratio  = video_driver_get_aspect_ratio();
       else
@@ -400,18 +416,18 @@ bool recording_init(void)
          params.out_height = recording_height;
       }
 
-      if (settings->video.force_aspect &&
+      if (settings->bools.video_force_aspect &&
             (video_driver_get_aspect_ratio() > 0.0f))
          params.aspect_ratio = video_driver_get_aspect_ratio();
       else
          params.aspect_ratio = (float)params.out_width / params.out_height;
 
-      if (settings->video.post_filter_record 
+      if (settings->bools.video_post_filter_record
             && video_driver_frame_filter_alive())
       {
          unsigned max_width  = 0;
          unsigned max_height = 0;
-         
+
          params.pix_fmt    = FFEMU_PIX_RGB565;
 
          if (video_driver_frame_filter_is_32bit())

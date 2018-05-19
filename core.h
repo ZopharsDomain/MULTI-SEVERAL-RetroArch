@@ -21,7 +21,6 @@
 #include <boolean.h>
 #include <libretro.h>
 
-#include <retro_miscellaneous.h>
 #include <retro_common_api.h>
 
 #include "core_type.h"
@@ -31,17 +30,29 @@ RETRO_BEGIN_DECLS
 
 enum
 {
-   /* Polling is performed before 
+   /* Polling is performed before
     * call to retro_run. */
    POLL_TYPE_EARLY = 0,
 
    /* Polling is performed when requested. */
    POLL_TYPE_NORMAL,
 
-   /* Polling is performed on first call to 
+   /* Polling is performed on first call to
     * retro_input_state per frame. */
    POLL_TYPE_LATE
 };
+
+typedef struct rarch_memory_descriptor
+{
+   struct retro_memory_descriptor core;
+   size_t disconnect_mask;
+} rarch_memory_descriptor_t;
+
+typedef struct rarch_memory_map
+{
+   rarch_memory_descriptor_t *descriptors;
+   unsigned num_descriptors;
+} rarch_memory_map_t;
 
 typedef struct rarch_system_info
 {
@@ -49,11 +60,12 @@ typedef struct rarch_system_info
 
    unsigned rotation;
    unsigned performance_level;
+   bool load_no_content;
 
    const char *input_desc_btn[MAX_USERS][RARCH_FIRST_META_KEY];
    char valid_extensions[255];
 
-   struct retro_disk_control_callback  disk_control_cb; 
+   struct retro_disk_control_callback  disk_control_cb;
    struct retro_location_callback      location_cb;
 
    struct
@@ -67,8 +79,8 @@ typedef struct rarch_system_info
       struct retro_controller_info *data;
       unsigned size;
    } ports;
-   
-   struct retro_memory_map mmaps;
+
+   rarch_memory_map_t mmaps;
 } rarch_system_info_t;
 
 typedef struct retro_ctx_input_state_info
@@ -130,14 +142,6 @@ typedef struct retro_ctx_environ_info
    retro_environment_t env;
 } retro_ctx_environ_info_t;
 
-typedef struct retro_ctx_frame_info
-{
-   const void *data;
-   unsigned width;
-   unsigned height;
-   size_t pitch;
-} retro_ctx_frame_info_t;
-
 typedef struct retro_callbacks
 {
    retro_video_refresh_t frame_cb;
@@ -147,20 +151,27 @@ typedef struct retro_callbacks
    retro_input_poll_t poll_cb;
 } retro_callbacks_t;
 
-bool core_load(void);
+bool core_load(unsigned poll_type_behavior);
 
 bool core_unload(void);
 
-bool core_set_default_callbacks(void *data);
+bool core_set_default_callbacks(struct retro_callbacks *cbs);
 
 bool core_set_rewind_callbacks(void);
 
+#ifdef HAVE_NETWORKING
 bool core_set_netplay_callbacks(void);
+
+bool core_unset_netplay_callbacks(void);
+#endif
 
 bool core_set_poll_type(unsigned *type);
 
 /* Runs the core for one frame. */
 bool core_run(void);
+
+/* Runs the core for one frame, but does not trigger any input polling */
+bool core_run_no_input_polling(void);
 
 bool core_init(void);
 
@@ -169,10 +180,6 @@ bool core_deinit(void *data);
 bool core_unload_game(void);
 
 bool core_reset(void);
-
-void core_frame(retro_ctx_frame_info_t *info);
-
-bool core_poll(void);
 
 bool core_set_environment(retro_ctx_environ_info_t *info);
 
@@ -233,6 +240,8 @@ bool core_is_symbols_inited(void);
 bool core_is_inited(void);
 
 bool core_is_game_loaded(void);
+
+extern struct retro_callbacks retro_ctx;
 
 RETRO_END_DECLS
 

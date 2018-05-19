@@ -1,6 +1,6 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
- *  Copyright (C) 2011-2016 - Daniel De Matteis
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -24,11 +24,10 @@
 #endif
 
 #include <compat/strl.h>
-#include <features/features_cpu.h>
 
 #include "performance_counters.h"
 
-#include "runloop.h"
+#include "retroarch.h"
 #include "verbosity.h"
 
 #ifdef _WIN32
@@ -65,7 +64,7 @@ unsigned retro_get_perf_count_libretro(void)
 void rarch_perf_register(struct retro_perf_counter *perf)
 {
    if (
-            !runloop_ctl(RUNLOOP_CTL_IS_PERFCNT_ENABLE, NULL)
+            !rarch_ctl(RARCH_CTL_IS_PERFCNT_ENABLE, NULL)
          || perf->registered
          || perf_ptr_rarch >= MAX_COUNTERS
       )
@@ -99,16 +98,16 @@ static void log_counters(struct retro_perf_counter **counters, unsigned num)
       {
          RARCH_LOG(PERF_LOG_FMT,
                counters[i]->ident,
-               (unsigned long long)counters[i]->total /
-               (unsigned long long)counters[i]->call_cnt,
-               (unsigned long long)counters[i]->call_cnt);
+               (uint64_t)counters[i]->total /
+               (uint64_t)counters[i]->call_cnt,
+               (uint64_t)counters[i]->call_cnt);
       }
    }
 }
 
 void rarch_perf_log(void)
 {
-   if (!runloop_ctl(RUNLOOP_CTL_IS_PERFCNT_ENABLE, NULL))
+   if (!rarch_ctl(RARCH_CTL_IS_PERFCNT_ENABLE, NULL))
       return;
 
    RARCH_LOG("[PERF]: Performance counters (RetroArch):\n");
@@ -121,29 +120,56 @@ void retro_perf_log(void)
    log_counters(perf_counters_libretro, perf_ptr_libretro);
 }
 
-int performance_counter_init(struct retro_perf_counter *perf, const char *name)
+void rarch_timer_tick(rarch_timer_t *timer)
 {
-   perf->ident = name;
-
-   if (!perf->registered)
-      rarch_perf_register(perf);
-
-   return 0;
+   if (!timer)
+      return;
+   timer->current = cpu_features_get_time_usec();
+   timer->timeout = (timer->timeout_end - timer->current) / 1000000;
 }
 
-void performance_counter_start(struct retro_perf_counter *perf)
+int rarch_timer_get_timeout(rarch_timer_t *timer)
 {
-   if (!runloop_ctl(RUNLOOP_CTL_IS_PERFCNT_ENABLE, NULL) || !perf)
-      return;
-
-   perf->call_cnt++;
-   perf->start = cpu_features_get_perf_counter();
+   if (!timer)
+      return 0;
+   return (int)timer->timeout;
 }
 
-void performance_counter_stop(struct retro_perf_counter *perf)
+bool rarch_timer_is_running(rarch_timer_t *timer)
 {
-   if (!runloop_ctl(RUNLOOP_CTL_IS_PERFCNT_ENABLE, NULL) || !perf)
-      return;
+   if (!timer)
+      return false;
+   return timer->timer_begin;
+}
 
-   perf->total += cpu_features_get_perf_counter() - perf->start;
+bool rarch_timer_has_expired(rarch_timer_t *timer)
+{
+   if (!timer || timer->timeout <= 0)
+      return true;
+   return false;
+}
+
+void rarch_timer_end(rarch_timer_t *timer)
+{
+   if (!timer)
+      return;
+   timer->timer_end   = true;
+   timer->timer_begin = false;
+   timer->timeout_end = 0;
+}
+
+void rarch_timer_begin_new_time(rarch_timer_t *timer, uint64_t sec)
+{
+   if (!timer)
+      return;
+   timer->timeout_end = cpu_features_get_time_usec() + sec * 1000000;
+}
+
+void rarch_timer_begin(rarch_timer_t *timer, uint64_t sec)
+{
+   if (!timer)
+      return;
+   rarch_timer_begin_new_time(timer, sec);
+   timer->timer_begin = true;
+   timer->timer_end   = false;
 }

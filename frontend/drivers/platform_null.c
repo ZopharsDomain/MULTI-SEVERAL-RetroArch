@@ -1,7 +1,6 @@
 /* RetroArch - A frontend for libretro.
  * Copyright (C) 2010-2014 - Hans-Kristian Arntzen
- * Copyright (C) 2011-2016 - Daniel De Matteis
- * Copyright (C) 2012-2015 - Jason Fetters
+ * Copyright (C) 2011-2017 - Daniel De Matteis
  *
  * RetroArch is free software: you can redistribute it and/or modify it under the terms
  * of the GNU General Public License as published by the Free Software Found-
@@ -42,5 +41,10 @@ frontend_ctx_driver_t frontend_ctx_null = {
    NULL,                         /* destroy_sighandler_state */
    NULL,                         /* attach_console */
    NULL,                         /* detach_console */
+#ifdef HAVE_LAKKA
+   NULL,                         /* get_lakka_version */
+#endif
+   NULL,                         /* watch_path_for_changes */
+   NULL,                         /* check_for_path_changes */
    "null",
 };

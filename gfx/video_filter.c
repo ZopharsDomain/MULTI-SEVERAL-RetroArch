@@ -1,6 +1,6 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
- *  Copyright (C) 2011-2016 - Daniel De Matteis
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -17,6 +17,7 @@
 #include <stdlib.h>
 
 #include <file/file_path.h>
+#include <file/config_file_userdata.h>
 #include <lists/dir_list.h>
 #include <dynamic/dylib.h>
 #include <features/features_cpu.h>
@@ -28,7 +29,6 @@
 #endif
 
 #include "../frontend/frontend_driver.h"
-#include "../config_file_userdata.h"
 #include "../dynamic.h"
 #include "../performance_counters.h"
 #include "../verbosity.h"
@@ -136,10 +136,11 @@ static bool create_softfilter_graph(rarch_softfilter_t *filt,
 {
    unsigned input_fmts, input_fmt, output_fmts, i = 0;
    struct config_file_userdata userdata;
-   char key[64]  = {0};
-   char name[64] = {0};
+   char key[64], name[64];
 
    (void)i;
+
+   key[0] = name[0] = '\0';
 
    snprintf(key, sizeof(key), "filter");
 
@@ -164,7 +165,7 @@ static bool create_softfilter_graph(rarch_softfilter_t *filt,
 
    userdata.conf = filt->conf;
    /* Index-specific configs take priority over ident-specific. */
-   userdata.prefix[0] = key; 
+   userdata.prefix[0] = key;
    userdata.prefix[1] = filt->impl->short_ident;
 
    /* Simple assumptions. */
@@ -208,7 +209,7 @@ static bool create_softfilter_graph(rarch_softfilter_t *filt,
 
    filt->impl_data = filt->impl->create(
          &softfilter_config, input_fmt, input_fmt, max_width, max_height,
-         threads != RARCH_SOFTFILTER_THREADS_AUTO ? threads : 
+         threads != RARCH_SOFTFILTER_THREADS_AUTO ? threads :
          cpu_features_get_core_amount(), cpu_features,
          &userdata);
    if (!filt->impl_data)
@@ -311,7 +312,7 @@ static bool append_softfilter_plugs(rarch_softfilter_t *filt,
 
       RARCH_LOG("[SoftFilter]: Found plug: %s (%s).\n",
             impl->ident, impl->short_ident);
-      
+
       filt->plugs = new_plugs;
       filt->plugs[filt->num_plugs].lib = lib;
       filt->plugs[filt->num_plugs].impl = impl;
@@ -350,7 +351,7 @@ static bool append_softfilter_plugs(rarch_softfilter_t *filt,
       struct string_list *list)
 {
    unsigned i;
-   softfilter_simd_mask_t mask = cpu_features_get();
+   softfilter_simd_mask_t mask = (softfilter_simd_mask_t)cpu_features_get();
 
    (void)list;
 
@@ -387,7 +388,7 @@ rarch_softfilter_t *rarch_softfilter_new(const char *filter_config,
       enum retro_pixel_format in_pixel_format,
       unsigned max_width, unsigned max_height)
 {
-   softfilter_simd_mask_t cpu_features = cpu_features_get();
+   softfilter_simd_mask_t cpu_features = (softfilter_simd_mask_t)cpu_features_get();
    char basedir[PATH_MAX_LENGTH];
 #ifdef HAVE_DYLIB
    char ext_name[PATH_MAX_LENGTH];
@@ -523,7 +524,7 @@ void rarch_softfilter_process(rarch_softfilter_t *filt,
    if (filt->impl && filt->impl->get_work_packets)
       filt->impl->get_work_packets(filt->impl_data, filt->packets,
             output, output_stride, input, width, height, input_stride);
-   
+
 #ifdef HAVE_THREADS
    /* Fire off workers */
    for (i = 0; i < filt->threads; i++)

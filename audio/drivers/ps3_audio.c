@@ -1,7 +1,7 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
- *  Copyright (C) 2011-2016 - Daniel De Matteis
- * 
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
+ *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
  *  ation, either version 3 of the License, or (at your option) any later version.
@@ -20,7 +20,6 @@
 #include <queues/fifo_queue.h>
 
 #include "../audio_driver.h"
-#include "../../configuration.h"
 
 #include "../../defines/ps3_defines.h"
 
@@ -78,7 +77,9 @@ static void event_loop(uint64_t data)
 }
 
 static void *ps3_audio_init(const char *device,
-      unsigned rate, unsigned latency)
+      unsigned rate, unsigned latency,
+      unsigned block_frames,
+      unsigned *new_rate)
 {
    CellAudioPortParam params;
    ps3_audio_t *data = calloc(1, sizeof(*data));
@@ -109,11 +110,11 @@ static void *ps3_audio_init(const char *device,
       return NULL;
    }
 
-   data->buffer = fifo_new(CELL_AUDIO_BLOCK_SAMPLES * 
+   data->buffer = fifo_new(CELL_AUDIO_BLOCK_SAMPLES *
          AUDIO_CHANNELS * AUDIO_BLOCKS * sizeof(float));
 
 #ifdef __PSL1GHT__
-   sys_lwmutex_attr_t lock_attr = 
+   sys_lwmutex_attr_t lock_attr =
    {SYS_LWMUTEX_ATTR_PROTOCOL, SYS_LWMUTEX_ATTR_RECURSIVE, "\0"};
    sys_lwmutex_attr_t cond_lock_attr =
    {SYS_LWMUTEX_ATTR_PROTOCOL, SYS_LWMUTEX_ATTR_RECURSIVE, "\0"};
@@ -176,7 +177,7 @@ static bool ps3_audio_stop(void *data)
    return true;
 }
 
-static bool ps3_audio_start(void *data)
+static bool ps3_audio_start(void *data, bool is_shutdown)
 {
    ps3_audio_t *aud = data;
    if (!aud->started)
@@ -208,7 +209,7 @@ static void ps3_audio_free(void *data)
    ps3_audio_t *aud = data;
 
    aud->quit_thread = true;
-   ps3_audio_start(aud);
+   ps3_audio_start(aud, false);
    sys_ppu_thread_join(aud->thread, &val);
 
    ps3_audio_stop(aud);

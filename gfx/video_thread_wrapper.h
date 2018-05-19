@@ -1,7 +1,7 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
- *  Copyright (C) 2011-2016 - Daniel De Matteis
- * 
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
+ *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
  *  ation, either version 3 of the License, or (at your option) any later version.
@@ -23,6 +23,7 @@
 #include <retro_common_api.h>
 
 #include "video_driver.h"
+#include "font_driver.h"
 
 RETRO_BEGIN_DECLS
 
@@ -30,7 +31,8 @@ typedef int (*custom_command_method_t)(void*);
 
 typedef bool (*custom_font_command_method_t)(const void **font_driver,
       void **font_handle, void *video_data, const char *font_path,
-      float font_size, enum font_driver_render_api api);
+      float font_size, enum font_driver_render_api api,
+      bool is_threaded);
 
 typedef struct thread_packet thread_packet_t;
 
@@ -41,7 +43,7 @@ typedef struct thread_video thread_video_t;
  * @out_driver                : Output video driver
  * @out_data                  : Output video data
  * @input                     : Input input driver
- * @input_data                : Input input data 
+ * @input_data                : Input input data
  * @driver                    : Input Video driver
  * @info                      : Video info handle.
  *
@@ -53,13 +55,13 @@ typedef struct thread_video thread_video_t;
 bool video_init_thread(
       const video_driver_t **out_driver, void **out_data,
       const input_driver_t **input, void **input_data,
-      const video_driver_t *driver, const video_info_t *info);
+      const video_driver_t *driver, const video_info_t info);
 
 /**
  * video_thread_get_ptr:
  * @drv                       : Found driver.
  *
- * Gets the underlying video driver associated with the 
+ * Gets the underlying video driver associated with the
  * threaded video wrapper. Sets @drv to the found
  * video driver.
  *
@@ -78,7 +80,8 @@ bool video_thread_font_init(
       const char *font_path,
       float font_size,
       enum font_driver_render_api api,
-      custom_font_command_method_t func);
+      custom_font_command_method_t func,
+      bool is_threaded);
 
 unsigned video_thread_texture_load(void *data,
       custom_command_method_t func);

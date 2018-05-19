@@ -1,6 +1,6 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
- *  Copyright (C) 2011-2016 - Daniel De Matteis
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -30,10 +30,19 @@
 
 #include <retro_inline.h>
 
+#ifdef HAVE_CONFIG_H
+#include "../../config.h"
+#endif
+
+#ifdef HAVE_MENU
+#include "../../menu/menu_driver.h"
+#endif
+
+#include "../font_driver.h"
+
 #include "../../configuration.h"
 #include "../../frontend/frontend_driver.h"
 #include "../../verbosity.h"
-#include "../font_driver.h"
 
 #include "../common/x11_common.h"
 
@@ -89,11 +98,11 @@ static void xv_set_nonblock_state(void *data, bool state)
 static INLINE void xv_calculate_yuv(uint8_t *y, uint8_t *u, uint8_t *v,
       unsigned r, unsigned g, unsigned b)
 {
-   int y_ = (int)(+((double)r * 0.257) + ((double)g * 0.504) 
+   int y_ = (int)(+((double)r * 0.257) + ((double)g * 0.504)
          + ((double)b * 0.098) +  16.0);
-   int u_ = (int)(-((double)r * 0.148) - ((double)g * 0.291) 
+   int u_ = (int)(-((double)r * 0.148) - ((double)g * 0.291)
          + ((double)b * 0.439) + 128.0);
-   int v_ = (int)(+((double)r * 0.439) - ((double)g * 0.368) 
+   int v_ = (int)(+((double)r * 0.439) - ((double)g * 0.368)
          - ((double)b * 0.071) + 128.0);
 
    *y     = y_ < 0 ? 0 : (y_ > 255 ? 255 : y_);
@@ -127,26 +136,27 @@ static void xv_init_font(xv_t *xv, const char *font_path, unsigned font_size)
 {
    settings_t *settings = config_get_ptr();
 
-   if (!settings->video.font_enable)
+   if (!settings->bools.video_font_enable)
       return;
 
-   if (font_renderer_create_default((const void**)&xv->font_driver, 
-            &xv->font, *settings->path.font 
-            ? settings->path.font : NULL, settings->video.font_size))
+   if (font_renderer_create_default((const void**)&xv->font_driver,
+            &xv->font, *settings->paths.path_font
+            ? settings->paths.path_font : NULL,
+            settings->floats.video_font_size))
    {
       int r, g, b;
-      r = settings->video.msg_color_r * 255;
+      r = settings->floats.video_msg_color_r * 255;
       r = (r < 0 ? 0 : (r > 255 ? 255 : r));
-      g = settings->video.msg_color_g * 255;
+      g = settings->floats.video_msg_color_g * 255;
       g = (g < 0 ? 0 : (g > 255 ? 255 : g));
-      b = settings->video.msg_color_b * 255;
+      b = settings->floats.video_msg_color_b * 255;
       b = (b < 0 ? 0 : (b > 255 ? 255 : b));
 
       xv_calculate_yuv(&xv->font_y, &xv->font_u, &xv->font_v,
             r, g, b);
    }
    else
-      RARCH_LOG("Could not initialize fonts.\n");
+      RARCH_LOG("[XVideo]: Could not initialize fonts.\n");
 }
 
 /* We render @ 2x scale to combat chroma downsampling.
@@ -224,7 +234,7 @@ static void render32_yuy2(xv_t *xv, const void *input_,
          uint8_t y0, u, v;
          unsigned img_width;
          uint32_t p = *input++;
-         p = ((p >> 8) & 0xf800) | ((p >> 5) & 0x07e0) 
+         p = ((p >> 8) & 0xf800) | ((p >> 5) & 0x07e0)
             | ((p >> 3) & 0x1f); /* ARGB -> RGB16 */
 
          y0        = xv->ytable[p];
@@ -258,7 +268,7 @@ static void render32_uyvy(xv_t *xv, const void *input_,
          uint8_t y0, u, v;
          unsigned img_width;
          uint32_t p = *input++;
-         p = ((p >> 8) & 0xf800) 
+         p = ((p >> 8) & 0xf800)
             | ((p >> 5) & 0x07e0) | ((p >> 3) & 0x1f); /* ARGB -> RGB16 */
 
          y0        = xv->ytable[p];
@@ -325,8 +335,8 @@ static bool xv_adaptor_set_format(xv_t *xv, Display *dpy,
    {
       for (j = 0; j < ARRAY_SIZE(formats); j++)
       {
-         if (format[i].type == XvYUV 
-               && format[i].bits_per_pixel == 16 
+         if (format[i].type == XvYUV
+               && format[i].bits_per_pixel == 16
                && format[i].format == XvPacked)
          {
             if (format[i].component_order[0] == formats[j].components[0] &&
@@ -335,7 +345,7 @@ static bool xv_adaptor_set_format(xv_t *xv, Display *dpy,
                   format[i].component_order[3] == formats[j].components[3])
             {
                xv->fourcc         = format[i].id;
-               xv->render_func    = video->rgb32 
+               xv->render_func    = video->rgb32
                   ? formats[j].render_32 : formats[j].render_16;
 
                xv->luma_index[0]  = formats[j].luma_index[0];
@@ -362,7 +372,7 @@ static void xv_calc_out_rect(bool keep_aspect,
    vp->full_width       = vp_width;
    vp->full_height      = vp_height;
 
-   if (settings->video.scale_integer)
+   if (settings->bools.video_scale_integer)
       video_viewport_get_scaled_integer(vp, vp_width, vp_height,
             video_driver_get_aspect_ratio(), keep_aspect);
    else if (!keep_aspect)
@@ -377,7 +387,7 @@ static void xv_calc_out_rect(bool keep_aspect,
       float desired_aspect = video_driver_get_aspect_ratio();
       float device_aspect  = (float)vp_width / vp_height;
 
-      /* If the aspect ratios of screen and desired aspect ratio 
+      /* If the aspect ratios of screen and desired aspect ratio
        * are sufficiently equal (floating point stuff),
        * assume they are actually equal.
        */
@@ -411,8 +421,9 @@ static void *xv_init(const video_info_t *video,
       const input_driver_t **input, void **input_data)
 {
    unsigned i;
+   int ret;
    XWindowAttributes target;
-   char buf[128]                          = {0};
+   char title[128]                        = {0};
    XSetWindowAttributes attributes        = {0};
    XVisualInfo visualtemplate             = {0};
    unsigned width                         = 0;
@@ -434,7 +445,14 @@ static void *xv_init(const video_info_t *video,
    XInitThreads();
 
    g_x11_dpy = XOpenDisplay(NULL);
-   
+
+   if (g_x11_dpy == NULL)
+   {
+      RARCH_ERR("[XVideo]: Cannot connect to the X server.\n");
+      RARCH_ERR("[XVideo]: Check DISPLAY variable and if X is running.\n");
+      goto error;
+   }
+
    av_info = video_viewport_get_system_av_info();
 
    if (av_info)
@@ -442,7 +460,7 @@ static void *xv_init(const video_info_t *video,
 
    if (!XShmQueryExtension(g_x11_dpy))
    {
-      RARCH_ERR("XVideo: XShm extension not found.\n");
+      RARCH_ERR("[XVideo]: XShm extension not found.\n");
       goto error;
    }
 
@@ -450,12 +468,30 @@ static void *xv_init(const video_info_t *video,
 
    /* Find an appropriate Xv port. */
    xv->port = 0;
-   XvQueryAdaptors(g_x11_dpy,
+   ret = XvQueryAdaptors(g_x11_dpy,
          DefaultRootWindow(g_x11_dpy), &adaptor_count, &adaptor_info);
+
+   if (ret != Success)
+   {
+      if (ret == XvBadExtension)
+         RARCH_ERR("[XVideo]: Xv extension not found.\n");
+      else if (ret == XvBadAlloc)
+         RARCH_ERR("[XVideo]: XvQueryAdaptors() failed to allocate memory.\n");
+      else
+         RARCH_ERR("[XVideo]: Unkown error in XvQueryAdaptors().\n");
+
+      goto error;
+   }
+
+   if (adaptor_count == 0)
+   {
+      RARCH_ERR("[XVideo]: XvQueryAdaptors() found 0 adaptors.\n");
+      goto error;
+   }
 
    for (i = 0; i < adaptor_count; i++)
    {
-      /* Find adaptor that supports both input (memory->drawable) 
+      /* Find adaptor that supports both input (memory->drawable)
        * and image (drawable->screen) masks. */
 
       if (adaptor_info[i].num_formats < 1)
@@ -472,14 +508,14 @@ static void *xv_init(const video_info_t *video,
       xv->depth    = adaptor_info[i].formats->depth;
       xv->visualid = adaptor_info[i].formats->visual_id;
 
-      RARCH_LOG("XVideo: Found suitable XvPort #%u\n", (unsigned)xv->port);
+      RARCH_LOG("[XVideo]: Found suitable XvPort #%u\n", (unsigned)xv->port);
       break;
    }
    XvFreeAdaptorInfo(adaptor_info);
 
    if (xv->port == 0)
    {
-      RARCH_ERR("XVideo: Failed to find valid XvPort or format.\n");
+      RARCH_ERR("[XVideo]: Failed to find valid XvPort or format.\n");
       goto error;
    }
 
@@ -487,7 +523,7 @@ static void *xv_init(const video_info_t *video,
    visualtemplate.screen   = DefaultScreen(g_x11_dpy);
    visualtemplate.depth    = xv->depth;
    visualtemplate.visual   = 0;
-   visualinfo              = XGetVisualInfo(g_x11_dpy, VisualIDMask | 
+   visualinfo              = XGetVisualInfo(g_x11_dpy, VisualIDMask |
          VisualScreenMask | VisualDepthMask, &visualtemplate, &visualmatches);
 
    if (!visualinfo)
@@ -495,7 +531,7 @@ static void *xv_init(const video_info_t *video,
 
    if (visualmatches < 1 || !visualinfo->visual)
    {
-      RARCH_ERR("XVideo: Unable to find Xv-compatible visual.\n");
+      RARCH_ERR("[XVideo]: Unable to find Xv-compatible visual.\n");
       goto error;
    }
 
@@ -504,7 +540,7 @@ static void *xv_init(const video_info_t *video,
 
    attributes.colormap     = g_x11_cmap;
    attributes.border_pixel = 0;
-   attributes.event_mask   = StructureNotifyMask | KeyPressMask | 
+   attributes.event_mask   = StructureNotifyMask | KeyPressMask |
       KeyReleaseMask | ButtonReleaseMask | ButtonPressMask | DestroyNotify | ClientMessage;
 
    if (video->fullscreen)
@@ -525,16 +561,28 @@ static void *xv_init(const video_info_t *video,
    XFree(visualinfo);
    XSetWindowBackground(g_x11_dpy, g_x11_win, 0);
 
+   if (video->fullscreen && settings->bools.video_disable_composition)
+   {
+      uint32_t value = 1;
+      Atom cardinal = XInternAtom(g_x11_dpy, "CARDINAL", False);
+      Atom net_wm_bypass_compositor = XInternAtom(g_x11_dpy, "_NET_WM_BYPASS_COMPOSITOR", False);
+
+      RARCH_LOG("[XVideo]: Requesting compositor bypass.\n");
+      XChangeProperty(g_x11_dpy, g_x11_win, net_wm_bypass_compositor, cardinal, 32, PropModeReplace, (const unsigned char*)&value, 1);
+   }
+
    XMapWindow(g_x11_dpy, g_x11_win);
 
-   if (video_monitor_get_fps(buf, sizeof(buf), NULL, 0))
-      XStoreName(g_x11_dpy, g_x11_win, buf);
+   video_driver_get_window_title(title, sizeof(title));
+
+   if (title[0])
+      XStoreName(g_x11_dpy, g_x11_win, title);
 
    x11_set_window_attr(g_x11_dpy, g_x11_win);
 
    if (video->fullscreen)
    {
-      x11_windowed_fullscreen(g_x11_dpy, g_x11_win);
+      x11_set_net_wm_fullscreen(g_x11_dpy, g_x11_win);
       x11_show_mouse(g_x11_dpy, g_x11_win, false);
    }
 
@@ -556,7 +604,7 @@ static void *xv_init(const video_info_t *video,
 
    if (!xv->image)
    {
-      RARCH_ERR("XVideo: XShmCreateImage failed.\n");
+      RARCH_ERR("[XVideo]: XShmCreateImage failed.\n");
       goto error;
    }
 
@@ -568,7 +616,7 @@ static void *xv_init(const video_info_t *video,
 
    if (!XShmAttach(g_x11_dpy, &xv->shminfo))
    {
-      RARCH_ERR("XVideo: XShmAttach failed.\n");
+      RARCH_ERR("[XVideo]: XShmAttach failed.\n");
       goto error;
    }
    XSync(g_x11_dpy, False);
@@ -582,7 +630,7 @@ static void *xv_init(const video_info_t *video,
 
    if (input && input_data)
    {
-      xinput = input_x.init();
+      xinput = input_x.init(settings->arrays.input_joypad_driver);
       if (xinput)
       {
          *input = &input_x;
@@ -593,7 +641,7 @@ static void *xv_init(const video_info_t *video,
    }
 
    xv_init_yuv_tables(xv);
-   xv_init_font(xv, settings->path.font, settings->video.font_size);
+   xv_init_font(xv, settings->paths.path_font, settings->floats.video_font_size);
 
    if (!x11_input_ctx_new(true))
       goto error;
@@ -631,29 +679,29 @@ static bool xv_check_resize(xv_t *xv, unsigned width, unsigned height)
 
       if (xv->image == None)
       {
-         RARCH_ERR("Failed to create image.\n");
+         RARCH_ERR("[XVideo]: Failed to create image.\n");
          return false;
       }
 
       xv->width  = xv->image->width;
       xv->height = xv->image->height;
 
-      xv->shminfo.shmid = 
+      xv->shminfo.shmid =
          shmget(IPC_PRIVATE, xv->image->data_size, IPC_CREAT | 0777);
 
       if (xv->shminfo.shmid < 0)
       {
-         RARCH_ERR("Failed to init SHM.\n");
+         RARCH_ERR("[XVideo]: Failed to init SHM.\n");
          return false;
       }
 
-      xv->shminfo.shmaddr  = xv->image->data = 
+      xv->shminfo.shmaddr  = xv->image->data =
          (char*)shmat(xv->shminfo.shmid, NULL, 0);
       xv->shminfo.readOnly = false;
 
       if (!XShmAttach(g_x11_dpy, &xv->shminfo))
       {
-         RARCH_ERR("Failed to reattch XvShm image.\n");
+         RARCH_ERR("[XVideo]: Failed to reattch XvShm image.\n");
          return false;
       }
       XSync(g_x11_dpy, False);
@@ -678,8 +726,8 @@ static void xv_render_msg(xv_t *xv, const char *msg,
 
    atlas          = xv->font_driver->get_atlas(xv->font);
 
-   msg_base_x     = settings->video.msg_pos_x * width;
-   msg_base_y     = height * (1.0f - settings->video.msg_pos_y);
+   msg_base_x     = settings->floats.video_msg_pos_x * width;
+   msg_base_y     = height * (1.0f - settings->floats.video_msg_pos_y);
 
    luma_index[0]  = xv->luma_index[0];
    luma_index[1]  = xv->luma_index[1];
@@ -694,21 +742,21 @@ static void xv_render_msg(xv_t *xv, const char *msg,
       int base_x, base_y, glyph_width, glyph_height, max_width, max_height;
       const uint8_t *src             = NULL;
       uint8_t *out                   = NULL;
-      const struct font_glyph *glyph = 
+      const struct font_glyph *glyph =
          xv->font_driver->get_glyph(xv->font, (uint8_t)*msg);
 
       if (!glyph)
          continue;
 
-      /* Make sure we always start on the correct boundary 
+      /* Make sure we always start on the correct boundary
        * so the indices are correct. */
-      base_x          = (msg_base_x + glyph->draw_offset_x + 1) & ~1; 
+      base_x          = (msg_base_x + glyph->draw_offset_x + 1) & ~1;
       base_y          = msg_base_y + glyph->draw_offset_y;
 
       glyph_width     = glyph->width;
       glyph_height    = glyph->height;
 
-      src             = atlas->buffer + glyph->atlas_offset_x + 
+      src             = atlas->buffer + glyph->atlas_offset_x +
                         glyph->atlas_offset_y * atlas->width;
 
       if (base_x < 0)
@@ -754,21 +802,21 @@ static void xv_render_msg(xv_t *xv, const char *msg,
                alpha[1] = src[x + 1];
 
             /* Blended alpha for the sub-sampled U/V channels. */
-            alpha_sub = (alpha[0] + alpha[1]) >> 1; 
+            alpha_sub = (alpha[0] + alpha[1]) >> 1;
 
             for (i = 0; i < 2; i++)
             {
-               unsigned blended = (xv->font_y * alpha[i] 
+               unsigned blended = (xv->font_y * alpha[i]
                      + ((256 - alpha[i]) * out[out_x + luma_index[i]])) >> 8;
                out[out_x + luma_index[i]] = blended;
             }
 
             /* Blend chroma channels */
-            blended = (xv->font_u * alpha_sub 
+            blended = (xv->font_u * alpha_sub
                   + ((256 - alpha_sub) * out[out_x + chroma_u_index])) >> 8;
             out[out_x + chroma_u_index] = blended;
 
-            blended = (xv->font_v * alpha_sub 
+            blended = (xv->font_v * alpha_sub
                   + ((256 - alpha_sub) * out[out_x + chroma_v_index])) >> 8;
             out[out_x + chroma_v_index] = blended;
          }
@@ -781,7 +829,7 @@ static void xv_render_msg(xv_t *xv, const char *msg,
 
 static bool xv_frame(void *data, const void *frame, unsigned width,
       unsigned height, uint64_t frame_count,
-      unsigned pitch, const char *msg)
+      unsigned pitch, const char *msg, video_frame_info_t *video_info)
 {
    XWindowAttributes target;
    xv_t *xv                  = (xv_t*)data;
@@ -799,6 +847,10 @@ static bool xv_frame(void *data, const void *frame, unsigned width,
    xv->vp.full_width  = target.width;
    xv->vp.full_height = target.height;
 
+#ifdef HAVE_MENU
+   menu_driver_frame(video_info);
+#endif
+
    if (msg)
       xv_render_msg(xv, msg, width << 1, height << 1);
 
@@ -808,7 +860,7 @@ static bool xv_frame(void *data, const void *frame, unsigned width,
          true);
    XSync(g_x11_dpy, False);
 
-   x11_update_window_title(NULL);
+   x11_update_title(NULL, video_info);
 
    return true;
 }
@@ -873,7 +925,7 @@ static void xv_set_rotation(void *data, unsigned rotation)
    (void)rotation;
 }
 
-static bool xv_read_viewport(void *data, uint8_t *buffer)
+static bool xv_read_viewport(void *data, uint8_t *buffer, bool is_idle)
 {
    (void)data;
    (void)buffer;
@@ -881,11 +933,37 @@ static bool xv_read_viewport(void *data, uint8_t *buffer)
    return true;
 }
 
+static video_poke_interface_t xv_video_poke_interface = {
+   NULL, /* get_flags */
+   NULL,
+   NULL,
+   NULL,
+   NULL,
+   NULL,
+   x11_get_refresh_rate,
+   NULL,
+   NULL,
+   NULL,
+   NULL,
+   NULL,
+   NULL,
+   NULL,
+   NULL,
+   NULL,
+   NULL,
+   NULL,
+   NULL,
+   NULL,
+   NULL,
+   NULL,
+   NULL
+};
+
 static void xv_get_poke_interface(void *data,
       const video_poke_interface_t **iface)
 {
    (void)data;
-   (void)iface;
+   *iface = &xv_video_poke_interface;
 }
 
 static bool xv_set_shader(void *data,
@@ -895,7 +973,7 @@ static bool xv_set_shader(void *data,
    (void)type;
    (void)path;
 
-   return false; 
+   return false;
 }
 
 video_driver_t video_xvideo = {

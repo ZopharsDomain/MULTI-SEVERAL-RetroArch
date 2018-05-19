@@ -1,7 +1,7 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
- *  Copyright (C) 2011-2016 - Daniel De Matteis
- *  Copyright (C) 2016 - Brad Parker
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
+ *  Copyright (C) 2016-2017 - Brad Parker
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -18,10 +18,8 @@
 #ifndef _MENU_INPUT_H
 #define _MENU_INPUT_H
 
+#include <stdint.h>
 #include <retro_common_api.h>
-
-#include "../input/input_driver.h"
-#include "../input/input_keyboard.h"
 
 RETRO_BEGIN_DECLS
 
@@ -90,14 +88,15 @@ typedef struct menu_input
 
    struct
    {
+      bool back;
+      bool pressed[2];
       int16_t x;
       int16_t y;
       int16_t dx;
       int16_t dy;
-      float accel;
-      bool pressed[2];
-      bool back;
       unsigned ptr;
+      unsigned counter;
+      float accel;
    } pointer;
 } menu_input_t;
 

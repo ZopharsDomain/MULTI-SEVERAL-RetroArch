@@ -1,7 +1,7 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
- *  Copyright (C) 2011-2016 - Daniel De Matteis
- * 
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
+ *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
  *  ation, either version 3 of the License, or (at your option) any later version.
@@ -21,7 +21,7 @@
 
 #include <boolean.h>
 #include <retro_common_api.h>
-#include "lists/string_list.h"
+#include <lists/string_list.h>
 
 RETRO_BEGIN_DECLS
 
@@ -121,7 +121,7 @@ size_t core_option_manager_size(core_option_manager_t *opt);
  *
  * Returns: Description for an option.
  **/
-const char *core_option_manager_get_desc(core_option_manager_t *opt, 
+const char *core_option_manager_get_desc(core_option_manager_t *opt,
       size_t idx);
 
 /**
@@ -133,7 +133,7 @@ const char *core_option_manager_get_desc(core_option_manager_t *opt,
  *
  * Returns: Value for an option.
  **/
-const char *core_option_manager_get_val(core_option_manager_t *opt, 
+const char *core_option_manager_get_val(core_option_manager_t *opt,
       size_t idx);
 
 void core_option_manager_set_val(core_option_manager_t *opt,

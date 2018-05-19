@@ -1,7 +1,7 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
- *  Copyright (C) 2011-2016 - Daniel De Matteis
- * 
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
+ *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
  *  ation, either version 3 of the License, or (at your option) any later version.
@@ -21,14 +21,12 @@
 #include <compat/strl.h>
 #include <features/features_cpu.h>
 #include <rthreads/rthreads.h>
+#include <string/stdstring.h>
 
 #include "video_thread_wrapper.h"
 #include "font_driver.h"
-#include "video_shader_driver.h"
 
-#include "../configuration.h"
-#include "../performance_counters.h"
-#include "../runloop.h"
+#include "../retroarch.h"
 #include "../verbosity.h"
 
 enum thread_cmd
@@ -123,7 +121,7 @@ struct thread_packet
 
       struct
       {
-         char msg[255];
+         char msg[128];
          struct font_params params;
       } osd_message;
 
@@ -143,6 +141,7 @@ struct thread_packet
          const char *font_path;
          float font_size;
          bool return_value;
+         bool is_threaded;
          enum font_driver_render_api api;
       } font_init;
    } data;
@@ -167,7 +166,6 @@ struct thread_video
    const input_driver_t **input;
    void **input_data;
 
-#if defined(HAVE_MENU)
    struct
    {
       void *frame;
@@ -180,7 +178,6 @@ struct thread_video
       bool enable;
       bool full_screen;
    } texture;
-#endif
    bool apply_state_changes;
 
    bool alive;
@@ -188,6 +185,7 @@ struct thread_video
    bool suppress_screensaver;
    bool has_windowed;
    bool nonblock;
+   bool is_idle;
 
    retro_time_t last_time;
    unsigned hit_count;
@@ -239,7 +237,7 @@ static void video_thread_reply(thread_video_t *thr, const thread_packet_t *pkt)
 {
    slock_lock(thr->lock);
 
-   thr->cmd_data = *pkt;
+   thr->cmd_data  = *pkt;
 
    thr->reply_cmd = pkt->type;
    thr->send_cmd  = CMD_VIDEO_NONE;
@@ -254,7 +252,7 @@ static void video_thread_send_packet(thread_video_t *thr,
 {
    slock_lock(thr->lock);
 
-   thr->cmd_data = *pkt;
+   thr->cmd_data  = *pkt;
 
    thr->send_cmd  = pkt->type;
    thr->reply_cmd = CMD_VIDEO_NONE;
@@ -272,7 +270,7 @@ static void video_thread_wait_reply(thread_video_t *thr, thread_packet_t *pkt)
    while (pkt->type != thr->reply_cmd)
       scond_wait(thr->cond_cmd, thr->lock);
 
-   *pkt = thr->cmd_data;
+   *pkt               = thr->cmd_data;
    thr->cmd_data.type = CMD_VIDEO_NONE;
 
    slock_unlock(thr->lock);
@@ -342,7 +340,7 @@ static bool video_thread_handle_packet(
       case CMD_INIT:
          thr->driver_data = thr->driver->init(&thr->info,
                thr->input, thr->input_data);
-         pkt.data.b = thr->driver_data;
+         pkt.data.b = (thr->driver_data != NULL);
          thr->driver->viewport_info(thr->driver_data, &thr->vp);
          video_thread_reply(thr, &pkt);
          break;
@@ -365,11 +363,18 @@ static bool video_thread_handle_packet(
 
       case CMD_READ_VIEWPORT:
       {
-         struct video_viewport vp = {0};
+         struct video_viewport vp;
+
+         vp.x                     = 0;
+         vp.y                     = 0;
+         vp.width                 = 0;
+         vp.height                = 0;
+         vp.full_width            = 0;
+         vp.full_height           = 0;
 
          thr->driver->viewport_info(thr->driver_data, &vp);
 
-         if (memcmp(&vp, &thr->read_vp, sizeof(vp)) == 0)
+         if (string_is_equal_fast(&vp, &thr->read_vp, sizeof(vp)))
          {
             /* We can read safely
              *
@@ -387,7 +392,7 @@ static bool video_thread_handle_packet(
 
             if (thr->driver->read_viewport)
                ret = thr->driver->read_viewport(thr->driver_data,
-                     (uint8_t*)pkt.data.v);
+                     (uint8_t*)pkt.data.v, thr->is_idle);
 
             pkt.data.b = ret;
             thr->frame.within_thread = false;
@@ -515,16 +520,22 @@ static bool video_thread_handle_packet(
          break;
 
       case CMD_POKE_SET_ASPECT_RATIO:
-         thr->poke->set_aspect_ratio(thr->driver_data,
-               pkt.data.i);
+         if (thr->poke && thr->poke->set_aspect_ratio)
+            thr->poke->set_aspect_ratio(thr->driver_data,
+                  pkt.data.i);
          video_thread_reply(thr, &pkt);
          break;
 
       case CMD_POKE_SET_OSD_MSG:
-         if (thr->poke && thr->poke->set_osd_msg)
-            thr->poke->set_osd_msg(thr->driver_data,
-                  pkt.data.osd_message.msg,
-                  &pkt.data.osd_message.params, NULL);
+         {
+            video_frame_info_t video_info;
+            video_driver_build_info(&video_info);
+            if (thr->poke && thr->poke->set_osd_msg)
+               thr->poke->set_osd_msg(thr->driver_data,
+                     &video_info,
+                     pkt.data.osd_message.msg,
+                     &pkt.data.osd_message.params, NULL);
+         }
          video_thread_reply(thr, &pkt);
          break;
 
@@ -537,7 +548,8 @@ static bool video_thread_handle_packet(
                      pkt.data.font_init.video_data,
                      pkt.data.font_init.font_path,
                      pkt.data.font_init.font_size,
-                     pkt.data.font_init.api);
+                     pkt.data.font_init.api,
+                     pkt.data.font_init.is_threaded);
          video_thread_reply(thr, &pkt);
          break;
 
@@ -576,7 +588,7 @@ static void video_thread_loop(void *data)
       if (thr->frame.updated)
          updated = true;
 
-      /* To avoid race condition where send_cmd is updated 
+      /* To avoid race condition where send_cmd is updated
        * right after the switch is checked. */
       pkt = thr->cmd_data;
 
@@ -587,21 +599,34 @@ static void video_thread_loop(void *data)
 
       if (updated)
       {
+         struct video_viewport vp;
          bool                 ret = false;
          bool               alive = false;
          bool               focus = false;
          bool        has_windowed = true;
-         struct video_viewport vp = {0};
+
+         vp.x                     = 0;
+         vp.y                     = 0;
+         vp.width                 = 0;
+         vp.height                = 0;
+         vp.full_width            = 0;
+         vp.full_height           = 0;
 
          slock_lock(thr->frame.lock);
 
          thread_update_driver_state(thr);
 
          if (thr->driver && thr->driver->frame)
+         {
+            video_frame_info_t video_info;
+            video_driver_build_info(&video_info);
+
             ret = thr->driver->frame(thr->driver_data,
-               thr->frame.buffer, thr->frame.width, thr->frame.height,
-               thr->frame.count,
-               thr->frame.pitch, *thr->frame.msg ? thr->frame.msg : NULL);
+                  thr->frame.buffer, thr->frame.width, thr->frame.height,
+                  thr->frame.count,
+                  thr->frame.pitch, *thr->frame.msg ? thr->frame.msg : NULL,
+                  &video_info);
+         }
 
          slock_unlock(thr->frame.lock);
 
@@ -634,7 +659,7 @@ static bool video_thread_alive(void *data)
    bool ret;
    thread_video_t *thr = (thread_video_t*)data;
 
-   if (runloop_ctl(RUNLOOP_CTL_IS_PAUSED, NULL))
+   if (rarch_ctl(RARCH_CTL_IS_PAUSED, NULL))
    {
       thread_packet_t pkt = { CMD_ALIVE };
 
@@ -687,15 +712,14 @@ static bool video_thread_has_windowed(void *data)
 
 static bool video_thread_frame(void *data, const void *frame_,
       unsigned width, unsigned height, uint64_t frame_count,
-      unsigned pitch, const char *msg)
+      unsigned pitch, const char *msg, video_frame_info_t *video_info)
 {
    unsigned copy_stride;
-   static struct retro_perf_counter thr_frame = {0};
    const uint8_t *src                  = NULL;
    uint8_t *dst                        = NULL;
    thread_video_t *thr                 = (thread_video_t*)data;
 
-   /* If called from within read_viewport, we're actually in the 
+   /* If called from within read_viewport, we're actually in the
     * driver thread, so just render directly. */
    if (thr->frame.within_thread)
    {
@@ -703,14 +727,11 @@ static bool video_thread_frame(void *data, const void *frame_,
 
       if (thr->driver && thr->driver->frame)
          return thr->driver->frame(thr->driver_data, frame_,
-               width, height, frame_count, pitch, msg);
+               width, height, frame_count, pitch, msg, video_info);
       return false;
    }
 
-   performance_counter_init(&thr_frame, "thr_frame");
-   performance_counter_start(&thr_frame);
-
-   copy_stride = width * (thr->info.rgb32 
+   copy_stride = width * (thr->info.rgb32
          ? sizeof(uint32_t) : sizeof(uint16_t));
 
    src = (const uint8_t*)frame_;
@@ -720,10 +741,9 @@ static bool video_thread_frame(void *data, const void *frame_,
 
    if (!thr->nonblock)
    {
-      settings_t *settings = config_get_ptr();
 
       retro_time_t target_frame_time = (retro_time_t)
-         roundf(1000000 / settings->video.refresh_rate);
+         roundf(1000000 / video_info->refresh_rate);
       retro_time_t target = thr->last_time + target_frame_time;
 
       /* Ideally, use absolute time, but that is only a good idea on POSIX. */
@@ -740,7 +760,7 @@ static bool video_thread_frame(void *data, const void *frame_,
       }
    }
 
-   /* Drop frame if updated flag is still set, as thread is 
+   /* Drop frame if updated flag is still set, as thread is
     * still working on last frame. */
    if (!thr->frame.updated)
    {
@@ -778,8 +798,6 @@ static bool video_thread_frame(void *data, const void *frame_,
 
    slock_unlock(thr->lock);
 
-   performance_counter_stop(&thr_frame);
-
    thr->last_time = cpu_features_get_time_usec();
    return true;
 }
@@ -791,7 +809,8 @@ static void video_thread_set_nonblock_state(void *data, bool state)
       thr->nonblock = state;
 }
 
-static bool video_thread_init(thread_video_t *thr, const video_info_t *info,
+static bool video_thread_init(thread_video_t *thr,
+      const video_info_t info,
       const input_driver_t **input, void **input_data)
 {
    size_t max_size;
@@ -804,15 +823,15 @@ static bool video_thread_init(thread_video_t *thr, const video_info_t *info,
    thr->cond_thread          = scond_new();
    thr->input                = input;
    thr->input_data           = input_data;
-   thr->info                 = *info;
+   thr->info                 = info;
    thr->alive                = true;
    thr->focus                = true;
    thr->has_windowed         = true;
    thr->suppress_screensaver = true;
 
-   max_size                  = info->input_scale * RARCH_SCALE_BASE;
+   max_size                  = info.input_scale * RARCH_SCALE_BASE;
    max_size                 *= max_size;
-   max_size                 *= info->rgb32 ? sizeof(uint32_t) : sizeof(uint16_t);
+   max_size                 *= info.rgb32 ? sizeof(uint32_t) : sizeof(uint16_t);
    thr->frame.buffer         = (uint8_t*)malloc(max_size);
 
    if (!thr->frame.buffer)
@@ -854,13 +873,13 @@ static void video_thread_set_viewport(void *data, unsigned width,
    thread_video_t *thr = (thread_video_t*)data;
    if (!thr)
       return;
-    
+
    slock_lock(thr->lock);
 
     if (thr->driver && thr->driver->set_viewport)
         thr->driver->set_viewport(thr->driver_data, width, height,
                                   force_full, allow_rotate);
-    
+
    slock_unlock(thr->lock);
 }
 
@@ -877,10 +896,10 @@ static void video_thread_set_rotation(void *data, unsigned rotation)
    video_thread_send_and_wait_user_to_thread(thr, &pkt);
 }
 
-/* This value is set async as stalling on the video driver for 
+/* This value is set async as stalling on the video driver for
  * every query is too slow.
  *
- * This means this value might not be correct, so viewport 
+ * This means this value might not be correct, so viewport
  * reads are not supported for now. */
 static void video_thread_viewport_info(void *data, struct video_viewport *vp)
 {
@@ -897,7 +916,7 @@ static void video_thread_viewport_info(void *data, struct video_viewport *vp)
    slock_unlock(thr->lock);
 }
 
-static bool video_thread_read_viewport(void *data, uint8_t *buffer)
+static bool video_thread_read_viewport(void *data, uint8_t *buffer, bool is_idle)
 {
    thread_video_t *thr = (thread_video_t*)data;
    thread_packet_t pkt = { CMD_READ_VIEWPORT };
@@ -905,7 +924,8 @@ static bool video_thread_read_viewport(void *data, uint8_t *buffer)
    if (!thr)
       return false;
 
-   pkt.data.v = buffer;
+   pkt.data.v   = buffer;
+   thr->is_idle = is_idle;
 
    video_thread_send_and_wait_user_to_thread(thr, &pkt);
 
@@ -961,7 +981,7 @@ static bool thread_overlay_load(void *data,
 {
    thread_video_t *thr = (thread_video_t*)data;
    thread_packet_t pkt = { CMD_OVERLAY_LOAD };
-   const struct texture_image *images = 
+   const struct texture_image *images =
       (const struct texture_image*)image_data;
 
    if (!thr)
@@ -1132,7 +1152,6 @@ static void thread_set_aspect_ratio(void *data, unsigned aspectratio_idx)
    video_thread_send_and_wait_user_to_thread(thr, &pkt);
 }
 
-#if defined(HAVE_MENU)
 static void thread_set_texture_frame(void *data, const void *frame,
       bool rgb32, unsigned width, unsigned height, float alpha)
 {
@@ -1140,7 +1159,7 @@ static void thread_set_texture_frame(void *data, const void *frame,
    thread_video_t *thr = (thread_video_t*)data;
 
    slock_lock(thr->frame.lock);
-   required            = width * height * 
+   required            = width * height *
       (rgb32 ? sizeof(uint32_t) : sizeof(uint16_t));
 
    if (required > thr->texture.frame_cap)
@@ -1173,8 +1192,10 @@ static void thread_set_texture_enable(void *data, bool state, bool full_screen)
    slock_unlock(thr->frame.lock);
 }
 
-static void thread_set_osd_msg(void *data, const char *msg,
-      const struct font_params *params, void *font)
+static void thread_set_osd_msg(void *data,
+      video_frame_info_t *video_info,
+      const char *msg,
+      const void *params, void *font)
 {
    thread_video_t *thr = (thread_video_t*)data;
 
@@ -1184,9 +1205,8 @@ static void thread_set_osd_msg(void *data, const char *msg,
    /* TODO : find a way to determine if the calling
     * thread is the driver thread or not. */
    if (thr->poke && thr->poke->set_osd_msg)
-      thr->poke->set_osd_msg(thr->driver_data, msg, params, font);
+      thr->poke->set_osd_msg(thr->driver_data, video_info, msg, params, font);
 }
-#endif
 
 static uintptr_t thread_load_texture(void *video_data, void *data,
       bool threaded, enum texture_filter_type filter_type)
@@ -1222,7 +1242,7 @@ static void thread_apply_state_changes(void *data)
    slock_unlock(thr->frame.lock);
 }
 
-/* This is read-only state which should not 
+/* This is read-only state which should not
  * have any kind of race condition. */
 static struct video_shader *thread_get_current_shader(void *data)
 {
@@ -1232,10 +1252,22 @@ static struct video_shader *thread_get_current_shader(void *data)
    return thr->poke->get_current_shader(thr->driver_data);
 }
 
+static uint32_t thread_get_flags(void *data)
+{
+   thread_video_t *thr = (thread_video_t*)data;
+   if (!thr || !thr->poke || !thr->poke->get_flags)
+      return 0;
+   return thr->poke->get_flags(thr->driver_data);
+}
+
 static const video_poke_interface_t thread_poke = {
+   thread_get_flags,
+   NULL,                            /* set_coords */
+   NULL,                            /* set_mvp */
    thread_load_texture,
    thread_unload_texture,
    thread_set_video_mode,
+   NULL,
    thread_set_filtering,
    thread_get_video_output_size,
    thread_get_video_output_prev,
@@ -1244,19 +1276,16 @@ static const video_poke_interface_t thread_poke = {
    NULL, /* get_proc_address */
    thread_set_aspect_ratio,
    thread_apply_state_changes,
-#if defined(HAVE_MENU)
    thread_set_texture_frame,
    thread_set_texture_enable,
    thread_set_osd_msg,
-#else
-   NULL,
-   NULL,
-#endif
 
    NULL,
    NULL,
 
    thread_get_current_shader,
+   NULL,                      /* get_current_software_framebuffer */
+   NULL                       /* get_hw_render_interface */
 };
 
 static void video_thread_get_poke_interface(
@@ -1326,7 +1355,7 @@ static void video_thread_set_callbacks(
  * @out_driver                : Output video driver
  * @out_data                  : Output video data
  * @input                     : Input input driver
- * @input_data                : Input input data 
+ * @input_data                : Input input data
  * @driver                    : Input Video driver
  * @info                      : Video info handle.
  *
@@ -1337,7 +1366,7 @@ static void video_thread_set_callbacks(
  **/
 bool video_init_thread(const video_driver_t **out_driver,
       void **out_data,  const input_driver_t **input, void **input_data,
-      const video_driver_t *drv, const video_info_t *info)
+      const video_driver_t *drv, const video_info_t info)
 {
    thread_video_t *thr = (thread_video_t*)calloc(1, sizeof(*thr));
    if (!thr)
@@ -1355,7 +1384,7 @@ bool video_init_thread(const video_driver_t **out_driver,
  * video_thread_get_ptr:
  * @drv                       : Found driver.
  *
- * Gets the underlying video driver associated with the 
+ * Gets the underlying video driver associated with the
  * threaded video wrapper. Sets @drv to the found
  * video driver.
  *
@@ -1396,7 +1425,8 @@ static void video_thread_send_and_wait(thread_video_t *thr,
 
 bool video_thread_font_init(const void **font_driver, void **font_handle,
       void *data, const char *font_path, float font_size,
-      enum font_driver_render_api api, custom_font_command_method_t func)
+      enum font_driver_render_api api, custom_font_command_method_t func,
+      bool is_threaded)
 {
    thread_packet_t pkt;
    thread_video_t *thr = (thread_video_t*)video_driver_get_ptr(true);
@@ -1411,6 +1441,7 @@ bool video_thread_font_init(const void **font_driver, void **font_handle,
    pkt.data.font_init.video_data  = data;
    pkt.data.font_init.font_path   = font_path;
    pkt.data.font_init.font_size   = font_size;
+   pkt.data.font_init.is_threaded = is_threaded;
    pkt.data.font_init.api         = api;
 
    video_thread_send_and_wait(thr, &pkt);

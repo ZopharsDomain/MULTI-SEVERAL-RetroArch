@@ -1,6 +1,6 @@
 /*  RetroArch - A frontend for libretro.
- *  Copyright (c) 2011-2016 - Daniel De Matteis
- * 
+ *  Copyright (c) 2011-2017 - Daniel De Matteis
+ *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
  *  ation, either version 3 of the License, or (at your option) any later version.
@@ -27,6 +27,8 @@
 #include <retro_common_api.h>
 #include <retro_inline.h>
 
+#include "../video_driver.h"
+
 RETRO_BEGIN_DECLS
 
 extern uint32_t g_connector_id;
@@ -47,11 +49,13 @@ void drm_restore_crtc(void);
 
 bool drm_get_resources(int fd);
 
-bool drm_get_connector(int id);
-
 void drm_setup(int fd);
 
 void drm_free(void);
+
+bool drm_get_connector(int fd, video_frame_info_t *video_info);
+
+float drm_get_refresh_rate(void *data);
 
 static INLINE bool drm_wait_flip(int timeout)
 {

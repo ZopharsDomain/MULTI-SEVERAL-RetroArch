@@ -1,7 +1,7 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
  *  Copyright (C) 2011-2014 - Chris Moeller
- * 
+ *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
  *  ation, either version 3 of the License, or (at your option) any later version.
@@ -33,7 +33,6 @@
 #include <string/stdstring.h>
 
 #include "../audio_driver.h"
-#include "../../configuration.h"
 #include "../../verbosity.h"
 
 typedef struct coreaudio
@@ -95,13 +94,11 @@ static OSStatus audio_write_cb(void *userdata,
    (void)bus_number;
    (void)number_frames;
 
-   if (!io_data)
-      return noErr;
-   if (io_data->mNumberBuffers != 1)
+   if (!io_data || io_data->mNumberBuffers != 1)
       return noErr;
 
    write_avail = io_data->mBuffers[0].mDataByteSize;
-   outbuf = io_data->mBuffers[0].mData;
+   outbuf      = io_data->mBuffers[0].mData;
 
    slock_lock(dev->lock);
 
@@ -115,7 +112,7 @@ static OSStatus audio_write_cb(void *userdata,
       slock_unlock(dev->lock);
 
       /* Technically possible to deadlock without. */
-      scond_signal(dev->cond); 
+      scond_signal(dev->cond);
       return noErr;
    }
 
@@ -136,14 +133,17 @@ static void choose_output_device(coreaudio_t *dev, const char* device)
 {
    unsigned i;
    UInt32 deviceCount;
-   AudioDeviceID *devices = NULL;
-   AudioObjectPropertyAddress propaddr =
-   { 
-      kAudioHardwarePropertyDevices, 
-      kAudioObjectPropertyScopeGlobal, 
-      kAudioObjectPropertyElementMaster 
-   };
-   UInt32 size = 0;
+   AudioObjectPropertyAddress propaddr;
+   AudioDeviceID *devices              = NULL;
+   UInt32 size                         = 0;
+
+   propaddr.mSelector = kAudioHardwarePropertyDevices;
+#if MAC_OS_X_VERSION_10_12
+   propaddr.mScope    = kAudioObjectPropertyScopeOutput;
+#else
+   propaddr.mScope    = kAudioObjectPropertyScopeGlobal;
+#endif
+   propaddr.mElement  = kAudioObjectPropertyElementMaster;
 
    if (AudioObjectGetPropertyDataSize(kAudioObjectSystemObject,
             &propaddr, 0, 0, &size) != noErr)
@@ -156,20 +156,23 @@ static void choose_output_device(coreaudio_t *dev, const char* device)
             &propaddr, 0, 0, &size, devices) != noErr)
       goto done;
 
+#if MAC_OS_X_VERSION_10_12
+#else
    propaddr.mScope    = kAudioDevicePropertyScopeOutput;
+#endif
    propaddr.mSelector = kAudioDevicePropertyDeviceName;
-   size               = 1024;
 
    for (i = 0; i < deviceCount; i ++)
    {
       char device_name[1024];
       device_name[0] = 0;
+      size           = 1024;
 
       if (AudioObjectGetPropertyData(devices[i],
-               &propaddr, 0, 0, &size, device_name) == noErr 
+               &propaddr, 0, 0, &size, device_name) == noErr
             && string_is_equal(device_name, device))
       {
-         AudioUnitSetProperty(dev->dev, kAudioOutputUnitProperty_CurrentDevice, 
+         AudioUnitSetProperty(dev->dev, kAudioOutputUnitProperty_CurrentDevice,
                kAudioUnitScope_Global, 0, &devices[i], sizeof(AudioDeviceID));
          goto done;
       }
@@ -181,7 +184,9 @@ done:
 #endif
 
 static void *coreaudio_init(const char *device,
-      unsigned rate, unsigned latency)
+      unsigned rate, unsigned latency,
+      unsigned block_frames,
+      unsigned *new_rate)
 {
    size_t fifo_size;
    UInt32 i_size;
@@ -203,7 +208,6 @@ static void *coreaudio_init(const char *device,
 #else
    AudioComponentDescription desc          = {0};
 #endif
-   settings_t *settings                    = config_get_ptr();
    coreaudio_t *dev                        = (coreaudio_t*)
       calloc(1, sizeof(*dev));
    if (!dev)
@@ -240,7 +244,7 @@ static void *coreaudio_init(const char *device,
 #endif
    if (comp == NULL)
       goto error;
-   
+
 #if (defined(__MACH__) && (defined(__ppc__) || defined(__ppc64__)))
    component_unavailable = (OpenAComponent(comp, &dev->dev) != noErr);
 #else
@@ -255,7 +259,7 @@ static void *coreaudio_init(const char *device,
       choose_output_device(dev, device);
 #endif
 
-   dev->dev_alive = true;
+   dev->dev_alive                = true;
 
    /* Set audio format */
    stream_desc.mSampleRate       = rate;
@@ -265,17 +269,17 @@ static void *coreaudio_init(const char *device,
    stream_desc.mBytesPerFrame    = 2 * sizeof(float);
    stream_desc.mFramesPerPacket  = 1;
    stream_desc.mFormatID         = kAudioFormatLinearPCM;
-   stream_desc.mFormatFlags      = kAudioFormatFlagIsFloat | 
-      kAudioFormatFlagIsPacked | (is_little_endian() ? 
+   stream_desc.mFormatFlags      = kAudioFormatFlagIsFloat |
+      kAudioFormatFlagIsPacked | (is_little_endian() ?
             0 : kAudioFormatFlagIsBigEndian);
-   
+
    if (AudioUnitSetProperty(dev->dev, kAudioUnitProperty_StreamFormat,
          kAudioUnitScope_Input, 0, &stream_desc, sizeof(stream_desc)) != noErr)
       goto error;
-   
+
    /* Check returned audio format. */
    i_size = sizeof(real_desc);
-   if (AudioUnitGetProperty(dev->dev, kAudioUnitProperty_StreamFormat, 
+   if (AudioUnitGetProperty(dev->dev, kAudioUnitProperty_StreamFormat,
             kAudioUnitScope_Input, 0, &real_desc, &i_size) != noErr)
       goto error;
 
@@ -290,7 +294,7 @@ static void *coreaudio_init(const char *device,
 
    RARCH_LOG("[CoreAudio]: Using output sample rate of %.1f Hz\n",
          (float)real_desc.mSampleRate);
-   settings->audio.out_rate = real_desc.mSampleRate;
+   *new_rate = real_desc.mSampleRate;
 
    /* Set channel layout (fails on iOS). */
 #ifndef TARGET_OS_IPHONE
@@ -311,11 +315,11 @@ static void *coreaudio_init(const char *device,
    if (AudioUnitInitialize(dev->dev) != noErr)
       goto error;
 
-   fifo_size = (latency * settings->audio.out_rate) / 1000;
-   fifo_size *= 2 * sizeof(float);
-   dev->buffer_size = fifo_size;
+   fifo_size         = (latency * (*new_rate)) / 1000;
+   fifo_size        *= 2 * sizeof(float);
+   dev->buffer_size  = fifo_size;
 
-   dev->buffer = fifo_new(fifo_size);
+   dev->buffer       = fifo_new(fifo_size);
    if (!dev->buffer)
       goto error;
 
@@ -398,7 +402,7 @@ static bool coreaudio_stop(void *data)
    return dev->is_paused ? true : false;
 }
 
-static bool coreaudio_start(void *data)
+static bool coreaudio_start(void *data, bool is_shutdown)
 {
    coreaudio_t *dev = (coreaudio_t*)data;
    if (!dev)

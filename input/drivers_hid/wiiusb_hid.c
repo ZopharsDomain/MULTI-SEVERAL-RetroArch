@@ -1,5 +1,6 @@
 /*  RetroArch - A frontend for libretro.
- *  Copyright (C) 2015-2016 - Sergi Granell (xerpi)
+ *  Copyright (C) 2015-2017 - Sergi Granell (xerpi)
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -18,26 +19,32 @@
 #include <gccore.h>
 #include <rthreads/rthreads.h>
 
+#include "../input_defines.h"
+#include "../input_driver.h"
+
 #include "../connect/joypad_connection.h"
-#include "../input_autodetect.h"
-#include "../input_hid_driver.h"
+
+#include "../../tasks/tasks_internal.h"
 #include "../../verbosity.h"
 
-#define WIIUSB_SC_NONE 0
-#define WIIUSB_SC_INTMSG 1
-#define WIIUSB_SC_CTRLMSG 2
+#define WIIUSB_SC_NONE     0
+#define WIIUSB_SC_INTMSG   1
+#define WIIUSB_SC_CTRLMSG  2
 #define WIIUSB_SC_CTRLMSG2 3
 
 typedef struct wiiusb_hid
 {
-   joypad_connection_t *connections;
+   joypad_connection_t   *connections;
    struct wiiusb_adapter *adapters_head;
 
    sthread_t *poll_thread;
    volatile bool poll_thread_quit;
 
-   bool device_detected; /* helps on knowing if a new device has been inserted */
-   bool removal_cb; /* helps on detecting that a device has just been removed */
+   /* helps on knowing if a new device has been inserted */
+   bool device_detected;
+   /* helps on detecting that a device has just been removed */
+   bool removal_cb;
+
    bool manual_removal;
 } wiiusb_hid_t;
 
@@ -57,7 +64,7 @@ struct wiiusb_adapter
    int32_t slot;
    uint8_t *data;
 
-   uint8_t	send_control_type;
+   uint8_t  send_control_type;
    uint8_t *send_control_buffer;
    uint32_t send_control_size;
 };
@@ -68,15 +75,27 @@ static void wiiusb_hid_process_control_message(struct wiiusb_adapter* adapter)
    switch (adapter->send_control_type)
    {
       case WIIUSB_SC_INTMSG:
-         do { r = USB_WriteIntrMsg(adapter->handle, adapter->endpoint_out, adapter->send_control_size, adapter->send_control_buffer);
+         do
+         {
+            r = USB_WriteIntrMsg(adapter->handle,
+               adapter->endpoint_out, adapter->send_control_size,
+               adapter->send_control_buffer);
          } while (r < 0);
          break;
       case WIIUSB_SC_CTRLMSG:
-         do { r = USB_WriteCtrlMsg(adapter->handle, USB_REQTYPE_INTERFACE_SET, USB_REQ_SETREPORT, (USB_REPTYPE_FEATURE<<8) | 0xf4, 0x0, adapter->send_control_size, adapter->send_control_buffer);
+         do
+         {
+            r = USB_WriteCtrlMsg(adapter->handle, USB_REQTYPE_INTERFACE_SET,
+               USB_REQ_SETREPORT, (USB_REPTYPE_FEATURE<<8) | 0xf4, 0x0,
+               adapter->send_control_size, adapter->send_control_buffer);
          } while (r < 0);
          break;
       case WIIUSB_SC_CTRLMSG2:
-         do { r = USB_WriteCtrlMsg(adapter->handle, USB_REQTYPE_INTERFACE_SET, USB_REQ_SETREPORT, (USB_REPTYPE_OUTPUT<<8) | 0x01, 0x0, adapter->send_control_size, adapter->send_control_buffer);
+         do
+         {
+            r = USB_WriteCtrlMsg(adapter->handle, USB_REQTYPE_INTERFACE_SET,
+                  USB_REQ_SETREPORT, (USB_REPTYPE_OUTPUT<<8) | 0x01, 0x0,
+                  adapter->send_control_size, adapter->send_control_buffer);
          } while (r < 0);
          break;
       /*default:  any other case we do nothing */
@@ -91,12 +110,13 @@ static int32_t wiiusb_hid_read_cb(int32_t size, void *data)
    wiiusb_hid_t *hid = adapter ? adapter->hid : NULL;
 
    if (hid && hid->connections && size > 0)
-      pad_connection_packet(&hid->connections[adapter->slot], adapter->slot, adapter->data-1, size+1);
+      pad_connection_packet(&hid->connections[adapter->slot],
+            adapter->slot, adapter->data-1, size+1);
 
-	if (adapter)
+  if (adapter)
       adapter->busy = false;
 
-	return size;
+  return size;
 }
 
 static void wiiusb_hid_device_send_control(void *data,
@@ -123,20 +143,14 @@ static void wiiusb_hid_device_add_autodetect(unsigned idx,
       const char *device_name, const char *driver_name,
       uint16_t dev_vid, uint16_t dev_pid)
 {
-   autoconfig_params_t params = {{0}};
-   settings_t *settings       = config_get_ptr();
-
-   params.idx = idx;
-   params.vid = dev_vid;
-   params.pid = dev_pid;
-
-   strlcpy(params.name, device_name, sizeof(params.name));
-   strlcpy(params.driver, driver_name, sizeof(params.driver));
-
-   strlcpy(settings->input.device_names[idx], device_name,
-		sizeof(settings->input.device_names[idx]));
-
-   input_config_autoconfigure_joypad(&params);
+   if (!input_autoconfigure_connect(
+         device_name,
+         NULL,
+         driver_name,
+         idx,
+         dev_vid,
+         dev_pid))
+      input_config_set_device_name(idx, device_name);
 }
 
 static void wiiusb_get_description(usb_device_entry *device,
@@ -148,15 +162,18 @@ static void wiiusb_get_description(usb_device_entry *device,
    for (c = 0; c < devdesc->bNumConfigurations; c++)
    {
       const usb_configurationdesc *config = &devdesc->configurations[c];
+
       for (i = 0; i < (int)config->bNumInterfaces; i++)
       {
          const usb_interfacedesc *inter = &config->interfaces[i];
+
          for(k = 0; k < (int)inter->bNumEndpoints; k++)
          {
             const usb_endpointdesc *epdesc = &inter->endpoints[k];
-            bool is_int = (epdesc->bmAttributes & 0x03) == USB_ENDPOINT_INTERRUPT;
+            bool is_int = (epdesc->bmAttributes & 0x03)     == USB_ENDPOINT_INTERRUPT;
             bool is_out = (epdesc->bEndpointAddress & 0x80) == USB_ENDPOINT_OUT;
-            bool is_in = (epdesc->bEndpointAddress & 0x80) == USB_ENDPOINT_IN;
+            bool is_in  = (epdesc->bEndpointAddress & 0x80) == USB_ENDPOINT_IN;
+
             if (is_int)
             {
                if (is_in)
@@ -190,15 +207,17 @@ static const char *wiiusb_hid_joypad_name(void *data, unsigned pad)
 
 static int32_t wiiusb_hid_release_adapter(struct wiiusb_adapter *adapter)
 {
-   wiiusb_hid_t *hid;
-   const char *name;
+   wiiusb_hid_t *hid = NULL;
+   const char *name  = NULL;
 
    if (!adapter)
       return -1;
 
-   hid = adapter->hid;
+   hid  = adapter->hid;
    name = wiiusb_hid_joypad_name(hid, adapter->slot);
-   input_config_autoconfigure_disconnect(adapter->slot, name);
+
+   input_autoconfigure_disconnect(adapter->slot, name);
+
    pad_connection_pad_deinit(&hid->connections[adapter->slot], adapter->slot);
 
    free(adapter->send_control_buffer);
@@ -213,9 +232,8 @@ static int wiiusb_hid_remove_adapter(struct wiiusb_adapter *adapter)
    if (!adapter)
       return -1;
 
-   if (adapter->handle > 0)	{
+   if (adapter->handle > 0)
       USB_CloseDevice(&adapter->handle);
-   }
 
    wiiusb_hid_release_adapter(adapter);
 
@@ -225,8 +243,8 @@ static int wiiusb_hid_remove_adapter(struct wiiusb_adapter *adapter)
 static int wiiusb_hid_removal_cb(int result, void *usrdata)
 {
    struct wiiusb_adapter *adapter = (struct wiiusb_adapter *)usrdata;
-   wiiusb_hid_t *hid = adapter ? adapter->hid : NULL;
-   struct wiiusb_adapter *temp = hid ? hid->adapters_head : NULL;
+   wiiusb_hid_t *hid              = adapter ? adapter->hid       : NULL;
+   struct wiiusb_adapter *temp    = hid     ? hid->adapters_head : NULL;
 
    if (!adapter || !hid || !temp || hid->manual_removal)
       return -1;
@@ -256,8 +274,8 @@ static int wiiusb_hid_removal_cb(int result, void *usrdata)
 static int wiiusb_hid_add_adapter(void *data, usb_device_entry *dev)
 {
    usb_devdesc desc;
-   const char *device_name = NULL;
-   wiiusb_hid_t *hid = (wiiusb_hid_t*)data;
+   const char        *device_name = NULL;
+   wiiusb_hid_t              *hid = (wiiusb_hid_t*)data;
    struct wiiusb_adapter *adapter = (struct wiiusb_adapter*)
       calloc(1, sizeof(struct wiiusb_adapter));
 
@@ -291,7 +309,7 @@ static int wiiusb_hid_add_adapter(void *data, usb_device_entry *dev)
    }
 
    /* Allocate mem for the send control buffer, 32bit aligned */
-   adapter->send_control_type = WIIUSB_SC_NONE;
+   adapter->send_control_type   = WIIUSB_SC_NONE;
    adapter->send_control_buffer = memalign(32, 128);
 
    if (!adapter->send_control_buffer)
@@ -304,7 +322,7 @@ static int wiiusb_hid_add_adapter(void *data, usb_device_entry *dev)
     * control name until we get its interface */
    adapter->slot = pad_connection_pad_init(hid->connections,
          "hid", desc.idVendor, desc.idProduct,
-         adapter, &wiiusb_hid_device_send_control);
+         adapter, &wiiusb_hid);
 
    if (adapter->slot == -1)
       goto error;
@@ -315,13 +333,14 @@ static int wiiusb_hid_add_adapter(void *data, usb_device_entry *dev)
       goto error;
    }
 
-   adapter->data = memalign(32, 128);
-   adapter->hid = hid;
-   adapter->next = hid->adapters_head;
+   adapter->data      = memalign(32, 128);
+   adapter->hid       = hid;
+   adapter->next      = hid->adapters_head;
    hid->adapters_head = adapter;
 
    /*  Get the name from the interface */
    device_name = wiiusb_hid_joypad_name(hid, adapter->slot);
+
    RARCH_LOG("Interface found: [%s].\n", device_name);
 
    RARCH_LOG("Device 0x%p attached (VID/PID: %04x:%04x).\n",
@@ -345,7 +364,8 @@ error:
    return -1;
 }
 
-static bool wiiusb_hid_new_device(wiiusb_hid_t *hid, int32_t id) {
+static bool wiiusb_hid_new_device(wiiusb_hid_t *hid, int32_t id)
+{
    struct wiiusb_adapter *temp;
 
    if(!hid)
@@ -367,9 +387,8 @@ static void wiiusb_hid_scan_for_devices(wiiusb_hid_t *hid)
 {
    unsigned i;
    u8 count;
-   usb_device_entry *dev_entries;
-
-   dev_entries = (usb_device_entry *)calloc(MAX_USERS, sizeof(*dev_entries));
+   usb_device_entry *dev_entries = (usb_device_entry *)
+      calloc(MAX_USERS, sizeof(*dev_entries));
 
    if (!dev_entries)
       goto error;
@@ -379,7 +398,7 @@ static void wiiusb_hid_scan_for_devices(wiiusb_hid_t *hid)
 
    for (i = 0; i < count; i++)
    {
-		/* first check the device is not already in our list */
+    /* first check the device is not already in our list */
       if (!wiiusb_hid_new_device(hid, dev_entries[i].device_id))
          continue;
 
@@ -394,8 +413,8 @@ error:
 
 static void wiiusb_hid_poll_thread(void *data)
 {
-   wiiusb_hid_t *hid = (wiiusb_hid_t*)data;
-   struct wiiusb_adapter *adapter;
+   wiiusb_hid_t              *hid = (wiiusb_hid_t*)data;
+   struct wiiusb_adapter *adapter = NULL;
 
    if (!hid)
       return;
@@ -413,19 +432,20 @@ static void wiiusb_hid_poll_thread(void *data)
       }
 
       /* process each active adapter */
-      for (adapter=hid->adapters_head; adapter; adapter=adapter->next)
+      for (adapter = hid->adapters_head; adapter; adapter=adapter->next)
       {
-         if (!adapter->busy)
-         {
-            /* lock itself while writing or reading */
-            adapter->busy = true;
+         if (adapter->busy)
+            continue;
 
-            if (adapter->send_control_type)
-               wiiusb_hid_process_control_message(adapter);
+         /* lock itself while writing or reading */
+         adapter->busy = true;
 
-            USB_ReadIntrMsgAsync(adapter->handle, adapter->endpoint_in, adapter->endpoint_in_max_size,
-                                 adapter->data, wiiusb_hid_read_cb, adapter);
-         }
+         if (adapter->send_control_type)
+            wiiusb_hid_process_control_message(adapter);
+
+         USB_ReadIntrMsgAsync(adapter->handle, adapter->endpoint_in,
+               adapter->endpoint_in_max_size,
+               adapter->data, wiiusb_hid_read_cb, adapter);
       }
 
       /* Wait 10 milliseconds to process again */
@@ -440,14 +460,12 @@ static int wiiusb_hid_change_cb(int result, void *usrdata)
    if (!hid)
       return -1;
 
-	if (!hid->removal_cb)
-   {
-		/* As it's not coming from the removal callback
-		then we	detected a new device being inserted */
-		hid->device_detected = true;
-	}
-	else
-		hid->removal_cb = false;
+   /* As it's not coming from the removal callback
+      then we detected a new device being inserted */
+  if (!hid->removal_cb)
+    hid->device_detected = true;
+  else
+    hid->removal_cb      = false;
 
    /* Re-submit the change alert */
    USB_DeviceChangeNotifyAsync(USB_CLASS_HID, wiiusb_hid_change_cb, usrdata);
@@ -460,36 +478,40 @@ static bool wiiusb_hid_joypad_query(void *data, unsigned pad)
    return pad < MAX_USERS;
 }
 
-static uint64_t wiiusb_hid_joypad_get_buttons(void *data, unsigned port)
+static void wiiusb_hid_joypad_get_buttons(void *data,
+      unsigned port, input_bits_t *state)
 {
-   wiiusb_hid_t *hid = (wiiusb_hid_t*)data;
-   if (hid)
-      return pad_connection_get_buttons(&hid->connections[port], port);
-   return 0;
+  wiiusb_hid_t *hid = (wiiusb_hid_t*)data;
+  if (hid)
+  {
+    pad_connection_get_buttons(&hid->connections[port], port, state);
+    return;
+  }
+  BIT256_CLEAR_ALL_PTR(state);
 }
 
-static bool wiiusb_hid_joypad_button(void *data, unsigned port, uint16_t joykey)
+static bool wiiusb_hid_joypad_button(void *data,
+      unsigned port, uint16_t joykey)
 {
-   uint64_t buttons = wiiusb_hid_joypad_get_buttons(data, port);
+  input_bits_t buttons;
 
-   if (joykey == NO_BTN)
-      return false;
+  wiiusb_hid_joypad_get_buttons(data, port, &buttons);
 
-   /* Check hat. */
-   if (GET_HAT_DIR(joykey))
-      return false;
+  /* Check hat. */
+  if (GET_HAT_DIR(joykey))
+    return false;
 
-   /* Check the button. */
-   if ((port < MAX_USERS) && (joykey < 32))
-      return ((buttons & (1 << joykey)) != 0);
+  /* Check the button. */
+  if ((port < MAX_USERS) && (joykey < 32))
+    return (BIT256_GET(buttons, joykey) != 0);
 
-   return false;
+  return false;
 }
 
 static bool wiiusb_hid_joypad_rumble(void *data, unsigned pad,
       enum retro_rumble_effect effect, uint16_t strength)
 {
-   wiiusb_hid_t *hid	= (wiiusb_hid_t*)data;
+   wiiusb_hid_t *hid  = (wiiusb_hid_t*)data;
 
    if (!hid)
       return false;
@@ -500,8 +522,8 @@ static bool wiiusb_hid_joypad_rumble(void *data, unsigned pad,
 static int16_t wiiusb_hid_joypad_axis(void *data,
       unsigned port, uint32_t joyaxis)
 {
+   int16_t       val = 0;
    wiiusb_hid_t *hid = (wiiusb_hid_t*)data;
-   int16_t val = 0;
 
    if (joyaxis == AXIS_NONE)
       return 0;
@@ -526,18 +548,22 @@ static int16_t wiiusb_hid_joypad_axis(void *data,
    return val;
 }
 
-static void wiiusb_hid_free(void *data)
+static void wiiusb_hid_free(const void *data)
 {
-   wiiusb_hid_t *hid = (wiiusb_hid_t*)data;
-   struct wiiusb_adapter *adapter, *next_adapter;
+   struct wiiusb_adapter      *adapter = NULL;
+   struct wiiusb_adapter *next_adapter = NULL;
+   wiiusb_hid_t                   *hid = (wiiusb_hid_t*)data;
 
    if (!hid)
       return;
 
    hid->poll_thread_quit = true;
-   sthread_join(hid->poll_thread);
 
-   hid->manual_removal = TRUE;
+   if (hid->poll_thread)
+      sthread_join(hid->poll_thread);
+
+   hid->manual_removal   = TRUE;
+
    /* remove each of the adapters */
    for (adapter = hid->adapters_head; adapter; adapter = next_adapter)
    {
@@ -552,26 +578,28 @@ static void wiiusb_hid_free(void *data)
 
 static void *wiiusb_hid_init(void)
 {
-   wiiusb_hid_t *hid = (wiiusb_hid_t*)calloc(1, sizeof(*hid));
+   joypad_connection_t *connections = NULL;
+   wiiusb_hid_t                *hid = (wiiusb_hid_t*)calloc(1, sizeof(*hid));
 
    if (!hid)
       goto error;
 
-   hid->connections = pad_connection_init(MAX_USERS);
+   connections = pad_connection_init(MAX_USERS);
 
-   if (!hid->connections)
+   if (!connections)
       goto error;
 
-   /* Init hid values */
-   hid->adapters_head = NULL;
-   hid->removal_cb = FALSE;
-   hid->manual_removal = FALSE;
+   /* Initialize HID values */
+   hid->connections      = connections;
+   hid->adapters_head    = NULL;
+   hid->removal_cb       = FALSE;
+   hid->manual_removal   = FALSE;
    hid->poll_thread_quit = FALSE;
    /* we set it initially to TRUE so we force
     * to add the already connected pads */
-   hid->device_detected = TRUE;
+   hid->device_detected  = TRUE;
 
-   hid->poll_thread = sthread_create(wiiusb_hid_poll_thread, hid);
+   hid->poll_thread      = sthread_create(wiiusb_hid_poll_thread, hid);
 
    if (!hid->poll_thread)
    {
@@ -604,4 +632,5 @@ hid_driver_t wiiusb_hid = {
    wiiusb_hid_joypad_rumble,
    wiiusb_hid_joypad_name,
    "wiiusb",
+   wiiusb_hid_device_send_control,
 };

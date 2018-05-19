@@ -1,6 +1,7 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2015 - Michael Lelli
- * 
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
+ *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
  *  ation, either version 3 of the License, or (at your option) any later version.
@@ -18,7 +19,6 @@
 #include <boolean.h>
 
 #include "../audio_driver.h"
-#include "../../configuration.h"
 
 /* forward declarations */
 unsigned RWebAudioSampleRate(void);
@@ -37,16 +37,17 @@ static void rwebaudio_free(void *data)
    RWebAudioFree();
 }
 
-static void *rwebaudio_init(const char *device, unsigned rate, unsigned latency)
+static void *rwebaudio_init(const char *device, unsigned rate, unsigned latency,
+      unsigned block_frames,
+      unsigned *new_rate)
 {
-   settings_t *settings = config_get_ptr();
    void *data           = RWebAudioInit(latency);
 
    (void)device;
    (void)rate;
 
    if (data)
-      settings->audio.out_rate = RWebAudioSampleRate();
+      *new_rate         = RWebAudioSampleRate();
    return data;
 }
 
@@ -75,7 +76,7 @@ static bool rwebaudio_alive(void *data)
    return !rwebaudio_is_paused;
 }
 
-static bool rwebaudio_start(void *data)
+static bool rwebaudio_start(void *data, bool is_shutdown)
 {
    (void)data;
    rwebaudio_is_paused = false;

@@ -1,7 +1,7 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
- *  Copyright (C) 2011-2016 - Daniel De Matteis
- * 
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
+ *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
  *  ation, either version 3 of the License, or (at your option) any later version.
@@ -36,17 +36,15 @@
 #include "../common/vulkan_common.h"
 #endif
 
-#include "../../frontend/drivers/platform_linux.h"
-#include "../../configuration.h"
-#include "../../runloop.h"
+#include "../../frontend/drivers/platform_unix.h"
 
-static enum gfx_ctx_api android_api;
+static enum gfx_ctx_api android_api           = GFX_CTX_NONE;
 
 /* forward declaration */
 int system_property_get(const char *cmd, const char *args, char *value);
 
 #ifdef HAVE_OPENGLES
-static bool g_es3;
+static bool g_es3                             = false;
 
 #ifndef EGL_OPENGL_ES3_BIT_KHR
 #define EGL_OPENGL_ES3_BIT_KHR                  0x0040
@@ -100,18 +98,15 @@ static void android_gfx_ctx_destroy(void *data)
    free(data);
 }
 
-static void *android_gfx_ctx_init(void *video_driver)
+static void *android_gfx_ctx_init(video_frame_info_t *video_info, void *video_driver)
 {
 #ifdef HAVE_OPENGLES
    EGLint n, major, minor;
    EGLint format;
+#if 0
    struct retro_hw_render_callback *hwr = video_driver_get_hw_context();
    bool debug = hwr->debug_context;
-   EGLint context_attributes[] = {
-      EGL_CONTEXT_CLIENT_VERSION, g_es3 ? 3 : 2,
-      EGL_CONTEXT_FLAGS_KHR, debug ? EGL_CONTEXT_OPENGL_DEBUG_BIT_KHR : 0,
-      EGL_NONE
-   };
+#endif
    EGLint attribs[] = {
       EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
       EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
@@ -141,7 +136,7 @@ static void *android_gfx_ctx_init(void *video_driver)
 #ifdef HAVE_EGL
          RARCH_LOG("Android EGL: GLES version = %d.\n", g_es3 ? 3 : 2);
 
-         if (!egl_init_context(&and->egl, EGL_DEFAULT_DISPLAY,
+         if (!egl_init_context(&and->egl, EGL_NONE, EGL_DEFAULT_DISPLAY,
                   &major, &minor, &n, attribs))
          {
             egl_report_error();
@@ -173,16 +168,6 @@ static void *android_gfx_ctx_init(void *video_driver)
       case GFX_CTX_OPENGL_ES_API:
          ANativeWindow_setBuffersGeometry(android_app->window, 0, 0, format);
 
-#ifdef HAVE_EGL
-         if (!egl_create_context(&and->egl, context_attributes))
-         {
-            egl_report_error();
-            goto unlock_error;
-         }
-
-         if (!egl_create_surface(&and->egl, android_app->window))
-            goto unlock_error;
-#endif
          break;
       case GFX_CTX_NONE:
       default:
@@ -226,12 +211,12 @@ static void android_gfx_ctx_get_video_size(void *data,
 }
 
 static void android_gfx_ctx_check_window(void *data, bool *quit,
-      bool *resize, unsigned *width, unsigned *height, unsigned frame_count)
+      bool *resize, unsigned *width, unsigned *height,
+      bool is_shutdown)
 {
-   unsigned new_width, new_height;
+   unsigned new_width       = 0;
+   unsigned new_height      = 0;
    android_ctx_data_t *and  = (android_ctx_data_t*)data;
-
-   (void)frame_count;
 
    *quit = false;
 
@@ -245,10 +230,10 @@ static void android_gfx_ctx_check_window(void *data, bool *quit,
          break;
       case GFX_CTX_VULKAN_API:
 #ifdef HAVE_VULKAN
-         /* Swapchains are recreated in set_resize as a 
+         /* Swapchains are recreated in set_resize as a
           * central place, so use that to trigger swapchain reinit. */
-         *resize = and->vk.need_new_swapchain;
-         new_width = and->width;
+         *resize    = and->vk.need_new_swapchain;
+         new_width  = and->width;
          new_height = and->height;
 #endif
          break;
@@ -268,7 +253,7 @@ static void android_gfx_ctx_check_window(void *data, bool *quit,
    }
 
    /* Check if we are exiting. */
-   if (runloop_ctl(RUNLOOP_CTL_IS_SHUTDOWN, NULL))
+   if (is_shutdown)
       *quit = true;
 }
 
@@ -276,7 +261,7 @@ static bool android_gfx_ctx_set_resize(void *data,
       unsigned width, unsigned height)
 {
 #ifdef HAVE_VULKAN
-   android_ctx_data_t *and  = (android_ctx_data_t*)data;
+   android_ctx_data_t        *and  = (android_ctx_data_t*)data;
    struct android_app *android_app = (struct android_app*)g_android;
 #endif
    (void)data;
@@ -296,6 +281,7 @@ static bool android_gfx_ctx_set_resize(void *data,
             return false;
          }
 
+         vulkan_acquire_next_image(&and->vk);
          and->vk.context.invalid_swapchain = true;
          and->vk.need_new_swapchain        = false;
 #endif
@@ -309,25 +295,23 @@ static bool android_gfx_ctx_set_resize(void *data,
    return false;
 }
 
-static void android_gfx_ctx_update_window_title(void *data)
-{
-   char buf[128]        = {0};
-   char buf_fps[128]    = {0};
-   settings_t *settings = config_get_ptr();
-
-   video_monitor_get_fps(buf, sizeof(buf),
-         buf_fps, sizeof(buf_fps));
-   if (settings->fps_show)
-      runloop_msg_queue_push(buf_fps, 1, 1, false);
-}
-
 static bool android_gfx_ctx_set_video_mode(void *data,
+      video_frame_info_t *video_info,
       unsigned width, unsigned height,
       bool fullscreen)
 {
 #ifdef HAVE_VULKAN
    struct android_app *android_app = (struct android_app*)g_android;
    android_ctx_data_t *and = (android_ctx_data_t*)data;
+#endif
+#if defined(HAVE_OPENGLES) && defined(HAVE_EGL)
+   EGLint context_attributes[] = {
+      EGL_CONTEXT_CLIENT_VERSION, g_es3 ? 3 : 2,
+#if 0
+      EGL_CONTEXT_FLAGS_KHR, debug ? EGL_CONTEXT_OPENGL_DEBUG_BIT_KHR : 0,
+#endif
+      EGL_NONE
+   };
 #endif
 
    (void)width;
@@ -336,6 +320,20 @@ static bool android_gfx_ctx_set_video_mode(void *data,
 
    switch (android_api)
    {
+      case GFX_CTX_OPENGL_API:
+         break;
+      case GFX_CTX_OPENGL_ES_API:
+#if defined(HAVE_OPENGLES) && defined(HAVE_EGL)
+         if (!egl_create_context(&and->egl, context_attributes))
+         {
+            egl_report_error();
+            return false;
+         }
+
+         if (!egl_create_surface(&and->egl, android_app->window))
+            return false;
+#endif
+         break;
       case GFX_CTX_VULKAN_API:
 #ifdef HAVE_VULKAN
          and->width  = ANativeWindow_getWidth(android_app->window);
@@ -359,21 +357,27 @@ static bool android_gfx_ctx_set_video_mode(void *data,
 }
 
 static void android_gfx_ctx_input_driver(void *data,
+      const char *joypad_name,
       const input_driver_t **input, void **input_data)
 {
-   void *androidinput = input_android.init();
+   void *androidinput   = input_android.init(joypad_name);
 
-   (void)data;
+   *input               = androidinput ? &input_android : NULL;
+   *input_data          = androidinput;
+}
 
-   *input = androidinput ? &input_android : NULL;
-   *input_data = androidinput;
+static enum gfx_ctx_api android_gfx_ctx_get_api(void *data)
+{
+   return android_api;
 }
 
 static bool android_gfx_ctx_bind_api(void *data,
       enum gfx_ctx_api api, unsigned major, unsigned minor)
 {
    unsigned version;
-   
+
+   android_api = api;
+
    switch (api)
    {
       case GFX_CTX_OPENGL_API:
@@ -388,19 +392,16 @@ static bool android_gfx_ctx_bind_api(void *data,
             g_es3 = true;
 
          if (api == GFX_CTX_OPENGL_ES_API)
-         {
-            android_api = api;
             return true;
-         }
 #endif
          break;
       case GFX_CTX_VULKAN_API:
 #ifdef HAVE_VULKAN
-         android_api = api;
          return true;
 #else
          break;
 #endif
+      case GFX_CTX_NONE:
       default:
          break;
    }
@@ -410,7 +411,7 @@ static bool android_gfx_ctx_bind_api(void *data,
 
 static bool android_gfx_ctx_has_focus(void *data)
 {
-   bool focused;
+   bool                    focused = false;
    struct android_app *android_app = (struct android_app*)g_android;
    if (!android_app)
       return true;
@@ -429,12 +430,6 @@ static bool android_gfx_ctx_suppress_screensaver(void *data, bool enable)
    return false;
 }
 
-static bool android_gfx_ctx_has_windowed(void *data)
-{
-   (void)data;
-   return false;
-}
-
 static void dpi_get_density(char *s, size_t len)
 {
    system_property_get("getprop", "ro.sf.lcd_density", s);
@@ -447,7 +442,6 @@ static bool android_gfx_ctx_get_metrics(void *data,
 	enum display_metric_types type, float *value)
 {
    static int dpi = -1;
-   char density[PROP_VALUE_MAX] = {0};
 
    switch (type)
    {
@@ -458,6 +452,9 @@ static bool android_gfx_ctx_get_metrics(void *data,
       case DISPLAY_METRIC_DPI:
          if (dpi == -1)
          {
+            char density[PROP_VALUE_MAX];
+            density[0] = '\0';
+
             dpi_get_density(density, sizeof(density));
             if (string_is_empty(density))
                goto dpi_fallback;
@@ -484,7 +481,7 @@ dpi_fallback:
    return true;
 }
 
-static void android_gfx_ctx_swap_buffers(void *data)
+static void android_gfx_ctx_swap_buffers(void *data, void *data2)
 {
    android_ctx_data_t *and  = (android_ctx_data_t*)data;
 
@@ -588,7 +585,7 @@ static uint32_t android_gfx_ctx_get_flags(void *data)
 {
    uint32_t flags = 0;
    BIT32_SET(flags, GFX_CTX_FLAGS_NONE);
-   
+
    return flags;
 }
 
@@ -600,21 +597,23 @@ static void android_gfx_ctx_set_flags(void *data, uint32_t flags)
 const gfx_ctx_driver_t gfx_ctx_android = {
    android_gfx_ctx_init,
    android_gfx_ctx_destroy,
+   android_gfx_ctx_get_api,
    android_gfx_ctx_bind_api,
    android_gfx_ctx_set_swap_interval,
    android_gfx_ctx_set_video_mode,
    android_gfx_ctx_get_video_size,
+   NULL, /* get_refresh_rate */
    NULL, /* get_video_output_size */
    NULL, /* get_video_output_prev */
    NULL, /* get_video_output_next */
    android_gfx_ctx_get_metrics,
    NULL,
-   android_gfx_ctx_update_window_title,
+   NULL, /* update_title */
    android_gfx_ctx_check_window,
    android_gfx_ctx_set_resize,
    android_gfx_ctx_has_focus,
    android_gfx_ctx_suppress_screensaver,
-   android_gfx_ctx_has_windowed,
+   NULL, /* has_windowed */
    android_gfx_ctx_swap_buffers,
    android_gfx_ctx_input_driver,
    android_gfx_ctx_get_proc_address,

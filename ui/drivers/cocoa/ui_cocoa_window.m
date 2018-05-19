@@ -1,5 +1,5 @@
 /* RetroArch - A frontend for libretro.
- *  Copyright (C) 2011-2016 - Daniel De Matteis
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
  *
  * RetroArch is free software: you can redistribute it and/or modify it under the terms
  * of the GNU General Public License as published by the Free Software Found-
@@ -24,6 +24,11 @@
 #include "cocoa_common.h"
 #include "../ui_cocoa.h"
 #include "../../ui_companion_driver.h"
+
+static void* ui_window_cocoa_init(void)
+{
+   return NULL;
+}
 
 static void ui_window_cocoa_destroy(void *data)
 {
@@ -82,7 +87,8 @@ static bool ui_window_cocoa_focused(void *data)
    return false;
 }
 
-const ui_window_t ui_window_cocoa = {
+ui_window_t ui_window_cocoa = {
+   ui_window_cocoa_init,
    ui_window_cocoa_destroy,
    ui_window_cocoa_set_focused,
    ui_window_cocoa_set_visible,

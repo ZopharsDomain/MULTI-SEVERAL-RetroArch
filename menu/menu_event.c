@@ -1,7 +1,7 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
- *  Copyright (C) 2011-2016 - Daniel De Matteis
- *  Copyright (C) 2014-2016 - Jean-André Santoni
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
+ *  Copyright (C) 2014-2017 - Jean-André Santoni
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -24,142 +24,64 @@
 #include "../config.h"
 #endif
 
-#include <encodings/utf.h>
 #include <string/stdstring.h>
 
-#include "widgets/menu_entry.h"
 #include "widgets/menu_input_dialog.h"
-
-#include "menu_event.h"
+#include "widgets/menu_osk.h"
 
 #include "menu_driver.h"
-#include "menu_input.h"
 #include "menu_animation.h"
-#include "menu_display.h"
-#include "menu_navigation.h"
-
-#include "widgets/menu_dialog.h"
 
 #include "../configuration.h"
-#include "../content.h"
 #include "../retroarch.h"
-#include "../runloop.h"
+#include "../tasks/tasks_internal.h"
 
-static unsigned char menu_keyboard_key_state[RETROK_LAST];
+static unsigned char menu_keyboard_key_state[RETROK_LAST] = {0};
 
-enum osk_type
-{
-   OSK_TYPE_UNKNOWN = 0U,
-   OSK_LOWERCASE_LATIN,
-   OSK_UPPERCASE_LATIN,
-   OSK_HIRAGANA_PAGE1,
-   OSK_HIRAGANA_PAGE2,
-   OSK_KATAKANA_PAGE1,
-   OSK_KATAKANA_PAGE2,
-   OSK_TYPE_LAST
-};
-
-static enum osk_type osk_idx = OSK_LOWERCASE_LATIN;
-static int osk_ptr;
-static const char *osk_grid[45];
-static unsigned osk_last_codepoint = 0;
-static unsigned osk_last_codepoint_len = 0;
-
-static const char *uppercase_grid[] = {
-                          "!","@","#","$","%","^","&","*","(",")","⇦",
-                          "Q","W","E","R","T","Y","U","I","O","P","⏎",
-                          "A","S","D","F","G","H","J","K","L",":","⇩",
-                          "Z","X","C","V","B","N","M"," ","<",">","⊕"};
-
-static const char *lowercase_grid[] = {
-                          "1","2","3","4","5","6","7","8","9","0","⇦",
-                          "q","w","e","r","t","y","u","i","o","p","⏎",
-                          "a","s","d","f","g","h","j","k","l",";","⇧",
-                          "z","x","c","v","b","n","m"," ",",",".","⊕"};
-
-static const char *hiragana_page1_grid[] = {
-                          "あ","い","う","え","お","ら","り","る","れ","ろ","⇦",
-                          "か","き","く","け","こ","が","ぎ","ぐ","げ","ご","⏎",
-                          "さ","し","す","せ","そ","ざ","じ","ず","ぜ","ぞ","⇧",
-                          "た","ち","つ","て","と","だ","ぢ","づ","で","ど","⊕"};
-
-static const char *hiragana_page2_grid[] = {
-                          "な","に","ぬ","ね","の","ば","び","ぶ","べ","ぼ","⇦",
-                          "は","ひ","ふ","へ","ほ","ぱ","ぴ","ぷ","ぺ","ぽ","⏎",
-                          "ま","み","む","め","も","ん","っ","ゃ","ゅ","ょ","⇧",
-                          "や","ゆ","よ","わ","を","ぁ","ぃ","ぅ","ぇ","ぉ","⊕"};
-
-static const char *katakana_page1_grid[] = {
-                          "ア","イ","ウ","エ","オ","ラ","リ","ル","レ","ロ","⇦",
-                          "カ","キ","ク","ケ","コ","ガ","ギ","グ","ゲ","ゴ","⏎",
-                          "サ","シ","ス","セ","ソ","ザ","ジ","ズ","ゼ","ゾ","⇧",
-                          "タ","チ","ツ","テ","ト","ダ","ヂ","ヅ","デ","ド","⊕"};
-
-static const char *katakana_page2_grid[] = {
-                          "ナ","ニ","ヌ","ネ","ノ","バ","ビ","ブ","ベ","ボ","⇦",
-                          "ハ","ヒ","フ","ヘ","ホ","パ","ピ","プ","ペ","ポ","⏎",
-                          "マ","ミ","ム","メ","モ","ン","ッ","ャ","ュ","ョ","⇧",
-                          "ヤ","ユ","ヨ","ワ","ヲ","ァ","ィ","ゥ","ェ","ォ","⊕"};
-
-int menu_event_get_osk_ptr()
-{
-   return osk_ptr;
-}
-
-void menu_event_set_osk_ptr(int i)
-{
-   osk_ptr = i;
-}
-
-void menu_event_osk_append(int ptr)
-{
-   if (ptr >= 0)
-   {
-      if (string_is_equal(osk_grid[ptr],"⇦"))
-         input_keyboard_event(true, '\x7f', '\x7f', 0, RETRO_DEVICE_KEYBOARD);
-      else if (string_is_equal(osk_grid[ptr],"⏎"))
-         input_keyboard_event(true, '\n', '\n', 0, RETRO_DEVICE_KEYBOARD);
-      else if (string_is_equal(osk_grid[ptr],"⇧"))
-         osk_idx = OSK_UPPERCASE_LATIN;
-      else if (string_is_equal(osk_grid[ptr],"⇩"))
-         osk_idx = OSK_LOWERCASE_LATIN;
-      else if (string_is_equal(osk_grid[ptr],"⊕"))
-         if (osk_idx < OSK_TYPE_LAST - 1)
-            osk_idx = (enum osk_type)(osk_idx + 1);
-         else
-            osk_idx = (enum osk_type)(OSK_TYPE_UNKNOWN + 1);
-      else
-         input_keyboard_line_append(osk_grid[ptr]);
-   }
-}
-
-const char** menu_event_get_osk_grid()
-{
-   return osk_grid;
-}
-
+/* This function gets called for handling pointer events.
+ *
+ * Pointer events are touchscreen events that are spawned
+ * by touchpad/touchscreen. */
 static int menu_event_pointer(unsigned *action)
 {
+   rarch_joypad_info_t joypad_info;
+   int pointer_x, pointer_y;
+   size_t fb_pitch;
+   unsigned fb_width, fb_height;
    const struct retro_keybind *binds[MAX_USERS] = {NULL};
+   const input_driver_t *input_ptr              = input_get_ptr();
+   void *input_data                             = input_get_data();
    menu_input_t *menu_input                     = menu_input_get_ptr();
-   unsigned fb_width                            = menu_display_get_width();
-   unsigned fb_height                           = menu_display_get_height();
-   int pointer_device                           =
-      menu_driver_ctl(RARCH_MENU_CTL_IS_SET_TEXTURE, NULL) ?
-        RETRO_DEVICE_POINTER : RARCH_DEVICE_POINTER_SCREEN;
-   int pointer_x                                =
-      current_input->input_state(current_input_data, binds,
+   int pointer_device                           = menu_driver_is_texture_set()
+      ?
+      RETRO_DEVICE_POINTER : RARCH_DEVICE_POINTER_SCREEN;
+
+   menu_display_get_fb_size(&fb_width, &fb_height,
+         &fb_pitch);
+
+   joypad_info.joy_idx                          = 0;
+   joypad_info.auto_binds                       = NULL;
+   joypad_info.axis_threshold                   = 0.0f;
+
+   pointer_x                                    =
+      input_ptr->input_state(input_data, joypad_info, binds,
             0, pointer_device, 0, RETRO_DEVICE_ID_POINTER_X);
-   int pointer_y                                =
-      current_input->input_state(current_input_data, binds,
+   pointer_y                                    =
+      input_ptr->input_state(input_data, joypad_info, binds,
             0, pointer_device, 0, RETRO_DEVICE_ID_POINTER_Y);
 
-   menu_input->pointer.pressed[0]  = current_input->input_state(current_input_data, binds,
+   menu_input->pointer.pressed[0]  = input_ptr->input_state(input_data,
+         joypad_info,
+         binds,
          0, pointer_device, 0, RETRO_DEVICE_ID_POINTER_PRESSED);
-   menu_input->pointer.pressed[1]  = current_input->input_state(current_input_data, binds,
+   menu_input->pointer.pressed[1]  = input_ptr->input_state(input_data,
+         joypad_info,
+         binds,
          0, pointer_device, 1, RETRO_DEVICE_ID_POINTER_PRESSED);
-   menu_input->pointer.back        = current_input->input_state(current_input_data, binds,
-            0, pointer_device, 0, RARCH_DEVICE_ID_POINTER_BACK);
+   menu_input->pointer.back        = input_ptr->input_state(input_data,
+         joypad_info,
+         binds,
+         0, pointer_device, 0, RARCH_DEVICE_ID_POINTER_BACK);
 
    menu_input->pointer.x = ((pointer_x + 0x7fff) * (int)fb_width) / 0xFFFF;
    menu_input->pointer.y = ((pointer_y + 0x7fff) * (int)fb_height) / 0xFFFF;
@@ -167,31 +89,64 @@ static int menu_event_pointer(unsigned *action)
    return 0;
 }
 
-unsigned char menu_event_keyboard_is_set(enum retro_key key)
+/* Check if a specific keyboard key has been pressed. */
+unsigned char menu_event_kb_is_set(enum retro_key key)
 {
    return menu_keyboard_key_state[key];
 }
 
-void menu_event_keyboard_set(bool down, enum retro_key key)
+/* Set a specific keyboard key latch. */
+static void menu_event_kb_set_internal(unsigned idx, unsigned char key)
+{
+   menu_keyboard_key_state[idx] = key;
+}
+
+/* Set a specific keyboard key.
+ *
+ * 'down' sets the latch (true would
+ * mean the key is being pressed down, while 'false' would mean that
+ * the key has been released).
+ **/
+void menu_event_kb_set(bool down, enum retro_key key)
 {
    if (key == RETROK_UNKNOWN)
    {
       unsigned i;
 
       for (i = 0; i < RETROK_LAST; i++)
-         menu_keyboard_key_state[i] = (menu_keyboard_key_state[i] & 1) << 1;
+         menu_event_kb_set_internal(i, (menu_event_kb_is_set((enum retro_key)i) & 1) << 1);
    }
    else
-      menu_keyboard_key_state[key] = ((menu_keyboard_key_state[key] & 1) << 1) | down;
+      menu_event_kb_set_internal(key, ((menu_event_kb_is_set(key) & 1) << 1) | down);
 }
 
-unsigned menu_event(uint64_t input, uint64_t trigger_input)
+/*
+ * This function gets called in order to process all input events
+ * for the current frame.
+ *
+ * Sends input code to menu for one frame.
+ *
+ * It uses as input the local variables' input' and 'trigger_input'.
+ *
+ * Mouse and touch input events get processed inside this function.
+ *
+ * NOTE: 'input' and 'trigger_input' is sourced from the keyboard and/or
+ * the gamepad. It does not contain input state derived from the mouse
+ * and/or touch - this gets dealt with separately within this function.
+ *
+ * TODO/FIXME - maybe needs to be overhauled so we can send multiple
+ * events per frame if we want to, and we shouldn't send the
+ * entire button state either but do a separate event per button
+ * state.
+ */
+unsigned menu_event(input_bits_t *p_input, input_bits_t *p_trigger_input)
 {
    menu_animation_ctx_delta_t delta;
    float delta_time;
    /* Used for key repeat */
    static float delay_timer                = 0.0f;
    static float delay_count                = 0.0f;
+   static unsigned ok_old                  = 0;
    unsigned ret                            = MENU_ACTION_NOOP;
    static bool initial_held                = true;
    static bool first_held                  = false;
@@ -200,8 +155,22 @@ unsigned menu_event(uint64_t input, uint64_t trigger_input)
    size_t new_scroll_accel                 = 0;
    menu_input_t *menu_input                = NULL;
    settings_t *settings                    = config_get_ptr();
+   bool swap_ok_cancel_btns                = settings->bools.input_menu_swap_ok_cancel_buttons;
+   bool input_swap_override                = 
+      input_autoconfigure_get_swap_override();
+   unsigned menu_ok_btn                    = (!input_swap_override &&
+      swap_ok_cancel_btns) ?
+      RETRO_DEVICE_ID_JOYPAD_B : RETRO_DEVICE_ID_JOYPAD_A;
+   unsigned menu_cancel_btn                = (!input_swap_override &&
+      swap_ok_cancel_btns) ?
+      RETRO_DEVICE_ID_JOYPAD_A : RETRO_DEVICE_ID_JOYPAD_B;
+   unsigned ok_current                     = BIT256_GET_PTR(p_input,
+         menu_ok_btn );
+   unsigned ok_trigger                     = ok_current & ~ok_old;
 
-   if (input)
+   ok_old                                  = ok_current;
+
+   if (bits_any_set(p_input->data, ARRAY_SIZE(p_input->data)))
    {
       if (!first_held)
       {
@@ -215,7 +184,7 @@ unsigned menu_event(uint64_t input, uint64_t trigger_input)
 
       if (delay_count >= delay_timer)
       {
-         uint64_t input_repeat = 0;
+         uint32_t input_repeat = 0;
          BIT32_SET(input_repeat, RETRO_DEVICE_ID_JOYPAD_UP);
          BIT32_SET(input_repeat, RETRO_DEVICE_ID_JOYPAD_DOWN);
          BIT32_SET(input_repeat, RETRO_DEVICE_ID_JOYPAD_LEFT);
@@ -225,9 +194,9 @@ unsigned menu_event(uint64_t input, uint64_t trigger_input)
 
          set_scroll           = true;
          first_held           = false;
-         trigger_input |= input & input_repeat;
+         p_trigger_input->data[0] |= p_input->data[0] & input_repeat;
 
-         menu_navigation_ctl(MENU_NAVIGATION_CTL_GET_SCROLL_ACCEL,
+         menu_driver_ctl(MENU_NAVIGATION_CTL_GET_SCROLL_ACCEL,
                &new_scroll_accel);
 
          new_scroll_accel = MIN(new_scroll_accel + 1, 64);
@@ -243,159 +212,124 @@ unsigned menu_event(uint64_t input, uint64_t trigger_input)
    }
 
    if (set_scroll)
-      menu_navigation_ctl(MENU_NAVIGATION_CTL_SET_SCROLL_ACCEL,
+      menu_driver_ctl(MENU_NAVIGATION_CTL_SET_SCROLL_ACCEL,
             &new_scroll_accel);
 
    menu_animation_ctl(MENU_ANIMATION_CTL_DELTA_TIME, &delta_time);
 
    delta.current = delta_time;
 
-   if (menu_animation_ctl(MENU_ANIMATION_CTL_IDEAL_DELTA_TIME_GET, &delta))
+   if (menu_animation_get_ideal_delta_time(&delta))
       delay_count += delta.ideal;
 
    if (menu_input_dialog_get_display_kb())
    {
-      switch (osk_idx)
+      menu_event_osk_iterate();
+
+      if (BIT256_GET_PTR(p_trigger_input, RETRO_DEVICE_ID_JOYPAD_DOWN))
       {
-         case OSK_HIRAGANA_PAGE1:
-         {
-            memcpy(osk_grid, hiragana_page1_grid, sizeof(hiragana_page1_grid));
-            break;
-         }
-         case OSK_HIRAGANA_PAGE2:
-         {
-            memcpy(osk_grid, hiragana_page2_grid, sizeof(hiragana_page2_grid));
-            break;
-         }
-         case OSK_KATAKANA_PAGE1:
-         {
-            memcpy(osk_grid, katakana_page1_grid, sizeof(katakana_page1_grid));
-            break;
-         }
-         case OSK_KATAKANA_PAGE2:
-         {
-            memcpy(osk_grid, katakana_page2_grid, sizeof(katakana_page2_grid));
-            break;
-         }
-         case OSK_UPPERCASE_LATIN:
-         {
-            memcpy(osk_grid, uppercase_grid, sizeof(uppercase_grid));
-            break;
-         }
-         case OSK_LOWERCASE_LATIN:
-         default:
-         {
-            memcpy(osk_grid, lowercase_grid, sizeof(lowercase_grid));
-            break;
-         }
+         if (menu_event_get_osk_ptr() < 33)
+            menu_event_set_osk_ptr(menu_event_get_osk_ptr() 
+                  + OSK_CHARS_PER_LINE);
       }
 
-      if (trigger_input & (UINT64_C(1) << RETRO_DEVICE_ID_JOYPAD_DOWN))
+      if (BIT256_GET_PTR(p_trigger_input, RETRO_DEVICE_ID_JOYPAD_UP))
       {
-         if (osk_ptr < 33)
-            osk_ptr = osk_ptr + 11;
+         if (menu_event_get_osk_ptr() >= OSK_CHARS_PER_LINE)
+            menu_event_set_osk_ptr(menu_event_get_osk_ptr() 
+                  - OSK_CHARS_PER_LINE);
       }
 
-      if (trigger_input & (UINT64_C(1) << RETRO_DEVICE_ID_JOYPAD_UP))
+      if (BIT256_GET_PTR(p_trigger_input, RETRO_DEVICE_ID_JOYPAD_RIGHT))
       {
-         if (osk_ptr >= 10)
-            osk_ptr = osk_ptr - 11;
+         if (menu_event_get_osk_ptr() < 43)
+            menu_event_set_osk_ptr(menu_event_get_osk_ptr() + 1);
       }
 
-      if (trigger_input & (UINT64_C(1) << RETRO_DEVICE_ID_JOYPAD_RIGHT))
+      if (BIT256_GET_PTR(p_trigger_input, RETRO_DEVICE_ID_JOYPAD_LEFT))
       {
-         if (osk_ptr < 44)
-            osk_ptr = osk_ptr + 1;
+         if (menu_event_get_osk_ptr() >= 1)
+            menu_event_set_osk_ptr(menu_event_get_osk_ptr() - 1);
       }
 
-      if (trigger_input & (UINT64_C(1) << RETRO_DEVICE_ID_JOYPAD_LEFT))
+      if (BIT256_GET_PTR(p_trigger_input, RETRO_DEVICE_ID_JOYPAD_L))
       {
-         if (osk_ptr >= 1)
-            osk_ptr = osk_ptr - 1;
-      }
-
-      if (trigger_input & (UINT64_C(1) << RETRO_DEVICE_ID_JOYPAD_L))
-      {
-         if (osk_idx > OSK_TYPE_UNKNOWN + 1)
-            osk_idx = (enum osk_type)(osk_idx - 1);
+         if (menu_event_get_osk_idx() > OSK_TYPE_UNKNOWN + 1)
+            menu_event_set_osk_idx((enum osk_type)(
+                     menu_event_get_osk_idx() - 1));
          else
-            osk_idx = (enum osk_type)(OSK_TYPE_LAST - 1);
+            menu_event_set_osk_idx((enum osk_type)(OSK_TYPE_LAST - 1));
       }
 
-      if (trigger_input & (UINT64_C(1) << RETRO_DEVICE_ID_JOYPAD_R))
+      if (BIT256_GET_PTR(p_trigger_input, RETRO_DEVICE_ID_JOYPAD_R))
       {
-         if (osk_idx < OSK_TYPE_LAST - 1)
-            osk_idx = (enum osk_type)(osk_idx + 1);
+         if (menu_event_get_osk_idx() < OSK_TYPE_LAST - 1)
+            menu_event_set_osk_idx((enum osk_type)(
+                     menu_event_get_osk_idx() + 1));
          else
-            osk_idx = (enum osk_type)(OSK_TYPE_UNKNOWN + 1);
+            menu_event_set_osk_idx((enum osk_type)(OSK_TYPE_UNKNOWN + 1));
       }
 
-      if (trigger_input & (UINT64_C(1) << RETRO_DEVICE_ID_JOYPAD_A))
+      if (BIT256_GET_PTR(p_trigger_input, menu_ok_btn))
       {
-         if (osk_ptr >= 0)
-         {
-            const char *letter = osk_grid[osk_ptr];
-
-            osk_last_codepoint_len = strlen(osk_grid[osk_ptr]);
-            osk_last_codepoint = utf8_walk(&letter);
-
-            menu_event_osk_append(osk_ptr);
-         }
+         if (menu_event_get_osk_ptr() >= 0)
+            menu_event_osk_append(menu_event_get_osk_ptr());
       }
 
-      if (trigger_input & (UINT64_C(1) << RETRO_DEVICE_ID_JOYPAD_B))
-      {
-         input_keyboard_event(true, '\x7f', '\x7f', 0, RETRO_DEVICE_KEYBOARD);
-      }
+      if (BIT256_GET_PTR(p_trigger_input, menu_cancel_btn))
+         input_keyboard_event(true, '\x7f', '\x7f',
+               0, RETRO_DEVICE_KEYBOARD);
 
       /* send return key to close keyboard input window */
-      if (trigger_input & (UINT64_C(1) << RETRO_DEVICE_ID_JOYPAD_START))
+      if (BIT256_GET_PTR(p_trigger_input, RETRO_DEVICE_ID_JOYPAD_START))
          input_keyboard_event(true, '\n', '\n', 0, RETRO_DEVICE_KEYBOARD);
 
-      trigger_input = 0;
+      BIT256_CLEAR_ALL_PTR(p_trigger_input);
+   }
+   else
+   {
+      if (BIT256_GET_PTR(p_trigger_input, RETRO_DEVICE_ID_JOYPAD_UP))
+         ret = MENU_ACTION_UP;
+      else if (BIT256_GET_PTR(p_trigger_input, RETRO_DEVICE_ID_JOYPAD_DOWN))
+         ret = MENU_ACTION_DOWN;
+      else if (BIT256_GET_PTR(p_trigger_input, RETRO_DEVICE_ID_JOYPAD_LEFT))
+         ret = MENU_ACTION_LEFT;
+      else if (BIT256_GET_PTR(p_trigger_input, RETRO_DEVICE_ID_JOYPAD_RIGHT))
+         ret = MENU_ACTION_RIGHT;
+      else if (BIT256_GET_PTR(p_trigger_input, RETRO_DEVICE_ID_JOYPAD_L))
+         ret = MENU_ACTION_SCROLL_UP;
+      else if (BIT256_GET_PTR(p_trigger_input, RETRO_DEVICE_ID_JOYPAD_R))
+         ret = MENU_ACTION_SCROLL_DOWN;
+      else if (ok_trigger)
+         ret = MENU_ACTION_OK;
+      else if (BIT256_GET_PTR(p_trigger_input, menu_cancel_btn))
+         ret = MENU_ACTION_CANCEL;
+      else if (BIT256_GET_PTR(p_trigger_input, RETRO_DEVICE_ID_JOYPAD_X))
+         ret = MENU_ACTION_SEARCH;
+      else if (BIT256_GET_PTR(p_trigger_input, RETRO_DEVICE_ID_JOYPAD_Y))
+         ret = MENU_ACTION_SCAN;
+      else if (BIT256_GET_PTR(p_trigger_input, RETRO_DEVICE_ID_JOYPAD_START))
+         ret = MENU_ACTION_START;
+      else if (BIT256_GET_PTR(p_trigger_input, RETRO_DEVICE_ID_JOYPAD_SELECT))
+         ret = MENU_ACTION_INFO;
+      else if (BIT256_GET_PTR(p_trigger_input, RARCH_MENU_TOGGLE))
+         ret = MENU_ACTION_TOGGLE;
    }
 
-   if (trigger_input & (UINT64_C(1) << RETRO_DEVICE_ID_JOYPAD_UP))
-      ret = MENU_ACTION_UP;
-   else if (trigger_input & (UINT64_C(1) << RETRO_DEVICE_ID_JOYPAD_DOWN))
-      ret = MENU_ACTION_DOWN;
-   else if (trigger_input & (UINT64_C(1) << RETRO_DEVICE_ID_JOYPAD_LEFT))
-      ret = MENU_ACTION_LEFT;
-   else if (trigger_input & (UINT64_C(1) << RETRO_DEVICE_ID_JOYPAD_RIGHT))
-      ret = MENU_ACTION_RIGHT;
-   else if (trigger_input & (UINT64_C(1) << settings->menu_scroll_up_btn))
-      ret = MENU_ACTION_SCROLL_UP;
-   else if (trigger_input & (UINT64_C(1) << settings->menu_scroll_down_btn))
-      ret = MENU_ACTION_SCROLL_DOWN;
-   else if (trigger_input & (UINT64_C(1) << settings->menu_cancel_btn))
-      ret = MENU_ACTION_CANCEL;
-   else if (trigger_input & (UINT64_C(1) << settings->menu_ok_btn))
-      ret = MENU_ACTION_OK;
-   else if (trigger_input & (UINT64_C(1) << settings->menu_search_btn))
-      ret = MENU_ACTION_SEARCH;
-   else if (trigger_input & (UINT64_C(1) << RETRO_DEVICE_ID_JOYPAD_Y))
-      ret = MENU_ACTION_SCAN;
-   else if (trigger_input & (UINT64_C(1) << settings->menu_default_btn))
-      ret = MENU_ACTION_START;
-   else if (trigger_input & (UINT64_C(1) << settings->menu_info_btn))
-      ret = MENU_ACTION_INFO;
-   else if (trigger_input & (UINT64_C(1) << RARCH_MENU_TOGGLE))
-      ret = MENU_ACTION_TOGGLE;
-
-   if (menu_keyboard_key_state[RETROK_F11])
+   if (menu_event_kb_is_set(RETROK_F11))
    {
       command_event(CMD_EVENT_GRAB_MOUSE_TOGGLE, NULL);
-      menu_keyboard_key_state[RETROK_F11] = false;
+      menu_event_kb_set_internal(RETROK_F11, 0);
    }
 
-   if (runloop_cmd_press(trigger_input, RARCH_QUIT_KEY))
+   if (BIT256_GET_PTR(p_trigger_input, RARCH_QUIT_KEY))
       return MENU_ACTION_QUIT;
 
-   mouse_enabled                      = settings->menu.mouse.enable;
+   mouse_enabled                      = settings->bools.menu_mouse_enable;
 #ifdef HAVE_OVERLAY
    if (!mouse_enabled)
-      mouse_enabled = !(settings->input.overlay_enable
-            && input_overlay_is_alive(NULL));
+      mouse_enabled = !(settings->bools.input_overlay_enable
+            && input_overlay_is_alive(overlay_ptr));
 #endif
 
    if (!(menu_input = menu_input_get_ptr()))
@@ -404,7 +338,7 @@ unsigned menu_event(uint64_t input, uint64_t trigger_input)
    if (!mouse_enabled)
       menu_input->mouse.ptr = 0;
 
-   if (settings->menu.pointer.enable)
+   if (settings->bools.menu_pointer_enable)
       menu_event_pointer(&ret);
    else
    {

@@ -1,7 +1,7 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2011-2016 - Daniel De Matteis
- *  Copyright (C) 2015-2016 - Andre Leiradella
- *  Copyright (C) 2016 - Brad Parker
+ *  Copyright (C) 2015-2017 - Andre Leiradella
+ *  Copyright (C) 2016-2017 - Brad Parker
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -20,7 +20,6 @@
 #include <net/net_http.h>
 #include <features/features_cpu.h>
 
-#include "../performance_counters.h"
 #include "net_http_special.h"
 
 int net_http_get(const char **result, size_t *size, const char *url, retro_time_t *timeout)
@@ -31,7 +30,7 @@ int net_http_get(const char **result, size_t *size, const char *url, retro_time_
    int ret                        = NET_HTTP_GET_OK;
    struct http_t* http            = NULL;
    retro_time_t t0                = cpu_features_get_time_usec();
-   struct http_connection_t *conn = net_http_connection_new(url);
+   struct http_connection_t *conn = net_http_connection_new(url, "GET", NULL);
 
    *result = NULL;
 

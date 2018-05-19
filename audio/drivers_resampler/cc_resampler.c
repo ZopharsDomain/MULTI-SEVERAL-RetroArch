@@ -1,5 +1,5 @@
 /*  RetroArch - A frontend for libretro.
- *  Copyright (C) 2014-2016 - Ali Bouhlel ( aliaspider@gmail.com )
+ *  Copyright (C) 2014-2017 - Ali Bouhlel ( aliaspider@gmail.com )
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -27,7 +27,7 @@
 #include <memalign.h>
 #include <math/float_minmax.h>
 
-#include "../audio_resampler_driver.h"
+#include <audio/audio_resampler.h>
 
 /* Since SSE and NEON don't provide support for trigonometric functions
  * we approximate those with polynoms
@@ -151,7 +151,9 @@ done:
 }
 
 static void *resampler_CC_init(const struct resampler_config *config,
-      double bandwidth_mod, resampler_simd_mask_t mask)
+      double bandwidth_mod, 
+      enum resampler_quality quality,
+      resampler_simd_mask_t mask)
 {
    (void)mask;
    (void)bandwidth_mod;
@@ -348,7 +350,7 @@ static void resampler_CC_upsample(void *re_, struct resampler_data *data)
 }
 
 
-#elif defined (__ARM_NEON__)
+#elif defined (__ARM_NEON__) && !defined(DONT_WANT_ARM_OPTIMIZATIONS)
 
 #define CC_RESAMPLER_IDENT "NEON"
 
@@ -492,18 +494,20 @@ static void resampler_CC_process(void *re_, struct resampler_data *data)
 
 
 static void *resampler_CC_init(const struct resampler_config *config,
-      double bandwidth_mod, resampler_simd_mask_t mask)
+      double bandwidth_mod, 
+      enum resampler_quality quality,
+      resampler_simd_mask_t mask)
 {
    int i;
    rarch_CC_resampler_t *re = (rarch_CC_resampler_t*)
       memalign_alloc(32, sizeof(rarch_CC_resampler_t));
 
-   /* TODO: lookup if NEON support can be detected at 
+   /* TODO: lookup if NEON support can be detected at
     * runtime and a funcptr set at runtime for either
     * C codepath or NEON codepath. This will help out
     * Android. */
    (void)mask;
-   (void)config; 
+   (void)config;
    if (!re)
       return NULL;
 
@@ -540,7 +544,7 @@ static void resampler_CC_free(void *re_)
    (void)re_;
 }
 
-rarch_resampler_t CC_resampler = {
+retro_resampler_t CC_resampler = {
    resampler_CC_init,
    resampler_CC_process,
    resampler_CC_free,

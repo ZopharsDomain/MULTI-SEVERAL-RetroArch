@@ -1,5 +1,6 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
  *  Copyright (C) 2013-2014 - Tobias Jakobi
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
@@ -25,27 +26,28 @@
 #include <ctype.h>
 #include <assert.h>
 
+#include <sys/mman.h>
+#include <linux/omapfb.h>
+
 #ifdef HAVE_CONFIG_H
 #include "../../config.h"
 #endif
 
-#include <sys/mman.h>
-#include <linux/omapfb.h>
+#ifdef HAVE_MENU
+#include "../../menu/menu_driver.h"
+#endif
 
 #include <retro_inline.h>
 #include <retro_assert.h>
 #include <gfx/scaler/scaler.h>
+#include <gfx/video_frame.h>
 #include <string/stdstring.h>
+
+#include "../font_driver.h"
 
 #include "../../configuration.h"
 #include "../../driver.h"
 #include "../../retroarch.h"
-#include "../../runloop.h"
-
-#include "../video_context_driver.h"
-#include "../video_frame.h"
-
-#include "../font_driver.h"
 
 typedef struct omapfb_page
 {
@@ -93,7 +95,7 @@ static const char *omapfb_get_fb_device(void)
 {
    static char fbname[12] = {0};
    settings_t   *settings = config_get_ptr();
-   const int        fbidx = settings->video.monitor_index;
+   const int        fbidx = settings->uints.video_monitor_index;
 
    if (fbidx == 0)
       return "/dev/fb0";
@@ -178,12 +180,14 @@ static int omapfb_detect_screen(omapfb_data_t *pdata)
    int i, ret;
    int w, h;
    FILE *f;
-   int fb_id, overlay_id = -1, display_id = -1;
-   char buff[64]         = {0};
-   char manager_name[64] = {0};
-   char display_name[64] = {0};
+   char buff[64];
+   char manager_name[64];
+   char display_name[64];
+   int fb_id, overlay_id = -1, display_id      = -1;
 
-   /* Find out the native screen resolution, which is needed to 
+   buff[0] = manager_name[0] = display_name[0] = '\0';
+
+   /* Find out the native screen resolution, which is needed to
     * properly center the scaled image data. */
    ret = stat(pdata->fbname, &status);
 
@@ -600,7 +604,7 @@ static int omapfb_init(omapfb_data_t *pdata, unsigned bpp)
    /* always use triple buffering to reduce chance of tearing */
    pdata->bpp           = bpp;
    pdata->num_pages     = 3;
-   pdata->sync          = settings->video.vsync;
+   pdata->sync          = settings->bools.video_vsync;
 
    return 0;
 }
@@ -829,19 +833,19 @@ static void omap_init_font(omap_video_t *vid, const char *font_path, unsigned fo
    int r, g, b;
    settings_t *settings = config_get_ptr();
 
-   if (!settings->video.font_enable)
+   if (!settings->bools.video_font_enable)
       return;
 
    if (!(font_renderer_create_default(&vid->font_driver, &vid->font,
-               *settings->path.font ? settings->path.font : NULL, settings->video.font_size)))
+               *settings->paths.path_font ? settings->paths.path_font : NULL, settings->video.font_size)))
    {
       RARCH_LOG("[video_omap]: font init failed\n");
       return;
    }
 
-   r = settings->video.msg_color_r * 255;
-   g = settings->video.msg_color_g * 255;
-   b = settings->video.msg_color_b * 255;
+   r = settings->floats.video_msg_color_r * 255;
+   g = settings->floats.video_msg_color_g * 255;
+   b = settings->floats.video_msg_color_b * 255;
 
    r = (r < 0) ? 0 : (r > 255 ? 255 : r);
    g = (g < 0) ? 0 : (g > 255 ? 255 : g);
@@ -856,8 +860,8 @@ static void omap_render_msg(omap_video_t *vid, const char *msg)
 {
    const struct font_atlas *atlas = NULL;
    settings_t *settings = config_get_ptr();
-   int msg_base_x = settings->video.msg_pos_x * vid->width;
-   int msg_base_y = (1.0 - settings->video.msg_pos_y) * vid->height;
+   int msg_base_x = settings->floats.video_msg_pos_x * vid->width;
+   int msg_base_y = (1.0 - settings->floats.video_msg_pos_y) * vid->height;
 
    if (!vid->font)
       return;
@@ -869,7 +873,7 @@ static void omap_render_msg(omap_video_t *vid, const char *msg)
       int base_x, base_y;
       int glyph_width, glyph_height;
       const uint8_t *src = NULL;
-      const struct font_glyph *glyph = 
+      const struct font_glyph *glyph =
          vid->font_driver->get_glyph(vid->font, (uint8_t)*msg);
 
       if (!glyph)
@@ -884,7 +888,7 @@ static void omap_render_msg(omap_video_t *vid, const char *msg)
       glyph_width          = glyph->width;
       glyph_height         = glyph->height;
 
-      src                  = atlas->buffer + glyph->atlas_offset_x + 
+      src                  = atlas->buffer + glyph->atlas_offset_x +
          glyph->atlas_offset_y * atlas->width;
 
       if (base_x < 0)
@@ -960,7 +964,7 @@ static void *omap_gfx_init(const video_info_t *video,
    if (input && input_data)
       *input = NULL;
 
-   omap_init_font(vid, settings->path.font, settings->video.font_size);
+   omap_init_font(vid, settings->paths.path_font, settings->video.font_size);
 
    vid->menu.frame = calloc(vid->width * vid->height, vid->bytes_per_pixel);
    if (!vid->menu.frame)
@@ -982,7 +986,8 @@ fail:
 }
 
 static bool omap_gfx_frame(void *data, const void *frame, unsigned width,
-      unsigned height, uint64_t frame_count, unsigned pitch, const char *msg)
+      unsigned height, uint64_t frame_count, unsigned pitch, const char *msg,
+      video_frame_info_t *video_info)
 {
    omap_video_t *vid = (omap_video_t*)data;
 
@@ -1005,10 +1010,16 @@ static bool omap_gfx_frame(void *data, const void *frame, unsigned width,
 
    omapfb_prepare(vid->omap);
    omapfb_blit_frame(vid->omap, frame, vid->height, pitch);
+
+#ifdef HAVE_MENU
+   menu_driver_frame(video_info);
+#endif
+
    if (vid->menu.active)
       omapfb_blit_frame(vid->omap, vid->menu.frame,
             vid->menu.scaler.out_height,
             vid->menu.scaler.out_stride);
+
    if (msg)
       omap_render_msg(vid, msg);
 
@@ -1074,7 +1085,7 @@ static bool omap_gfx_set_shader(void *data,
    (void)type;
    (void)path;
 
-   return false; 
+   return false;
 }
 
 static void omap_gfx_set_rotation(void *data, unsigned rotation)
@@ -1083,7 +1094,7 @@ static void omap_gfx_set_rotation(void *data, unsigned rotation)
    (void)rotation;
 }
 
-static bool omap_gfx_read_viewport(void *data, uint8_t *buffer)
+static bool omap_gfx_read_viewport(void *data, uint8_t *buffer, bool is_idle)
 {
    (void)data;
    (void)buffer;
@@ -1118,10 +1129,24 @@ static void omap_gfx_set_texture_enable(void *data, bool state, bool full_screen
    (void) full_screen;
 }
 
+static float omap_get_refresh_rate(void *data)
+{
+   omap_video_t *vid = (omap_video_t*)data;
+   struct fb_var_screeninfo *s = &vid->omap->current_state->si;
+
+   return 1000000.0f / s->pixclock /
+          (s->xres + s->left_margin + s->right_margin + s->hsync_len) * 1000000.0f /
+          (s->yres + s->upper_margin + s->lower_margin + s->vsync_len);
+}
+
 static const video_poke_interface_t omap_gfx_poke_interface = {
+   NULL, /* get_flags  */
+   NULL, /* set_coords */
+   NULL, /* set_mvp */
    NULL,
    NULL,
    NULL,
+   omap_get_refresh_rate,
    NULL, /* set_filtering */
    NULL, /* get_video_output_size */
    NULL, /* get_video_output_prev */
@@ -1130,14 +1155,14 @@ static const video_poke_interface_t omap_gfx_poke_interface = {
    NULL, /* get_proc_address */
    NULL, /* set_aspect_ratio */
    NULL, /* apply_state_changes */
-#ifdef HAVE_MENU
    omap_gfx_set_texture_frame,
    omap_gfx_set_texture_enable,
-#endif
    NULL,
-   NULL, /* show_mouse */
-   NULL, /* grab_mouse_toggle */
-   NULL
+   NULL,                         /* show_mouse */
+   NULL,                         /* grab_mouse_toggle */
+   NULL,                         /* get_current_shader */
+   NULL,                         /* get_current_software_framebuffer */
+   NULL                          /* get_hw_render_interface */
 };
 
 static void omap_gfx_get_poke_interface(void *data,

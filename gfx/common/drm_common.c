@@ -1,6 +1,6 @@
 /*  RetroArch - A frontend for libretro.
- *  Copyright (c) 2011-2016 - Daniel De Matteis
- * 
+ *  Copyright (c) 2011-2017 - Daniel De Matteis
+ *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
  *  ation, either version 3 of the License, or (at your option) any later version.
@@ -15,22 +15,24 @@
 
 #include <compat/strl.h>
 
-#include "../../configuration.h"
+#include <retro_miscellaneous.h>
+
 #include "../../verbosity.h"
 
 #include "drm_common.h"
 
-uint32_t g_connector_id;
-int g_drm_fd;
-uint32_t g_crtc_id;
-
-static drmModeCrtc *g_orig_crtc;
 struct pollfd g_drm_fds;
 
-static drmModeRes *g_drm_resources;
-drmModeConnector *g_drm_connector;
-static drmModeEncoder *g_drm_encoder;
-drmModeModeInfo *g_drm_mode;
+uint32_t g_connector_id               = 0;
+int g_drm_fd                          = 0;
+uint32_t g_crtc_id                    = 0;
+
+static drmModeCrtc *g_orig_crtc       = NULL;
+
+static drmModeRes *g_drm_resources    = NULL;
+drmModeConnector *g_drm_connector     = NULL;
+static drmModeEncoder *g_drm_encoder  = NULL;
+drmModeModeInfo *g_drm_mode           = NULL;
 
 drmEventContext g_drm_evctx;
 
@@ -62,12 +64,11 @@ bool drm_get_resources(int fd)
    return true;
 }
 
-bool drm_get_connector(int fd)
+bool drm_get_connector(int fd, video_frame_info_t *video_info)
 {
    unsigned i;
    unsigned monitor_index = 0;
-   settings_t *settings   = config_get_ptr();
-   unsigned monitor       = MAX(settings->video.monitor_index, 1);
+   unsigned monitor       = MAX(video_info->monitor_index, 1);
 
    /* Enumerate all connectors. */
 
@@ -165,6 +166,18 @@ void drm_setup(int fd)
    g_orig_crtc      = drmModeGetCrtc(fd, g_crtc_id);
    if (!g_orig_crtc)
       RARCH_WARN("[DRM]: Cannot find original CRTC.\n");
+}
+
+float drm_get_refresh_rate(void *data)
+{
+   float refresh_rate = 0.0f;
+
+   if (g_drm_mode)
+   {
+      refresh_rate = g_drm_mode->clock * 1000.0f / g_drm_mode->htotal / g_drm_mode->vtotal;
+   }
+
+   return refresh_rate;
 }
 
 void drm_free(void)

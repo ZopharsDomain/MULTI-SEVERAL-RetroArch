@@ -1,7 +1,8 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
+ *  Copyright (C) 2011 2017 - Daniel De Matteis
  *  Copyright (C) 2014 2015 - Jean-Andre Santoni
- * 
+ *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
  *  ation, either version 3 of the License, or (at your option) any later version.
@@ -28,9 +29,7 @@
 #include "../common/gl_common.h"
 #endif
 
-#include "../../configuration.h"
 #include "../../frontend/frontend_driver.h"
-#include "../../runloop.h"
 
 typedef struct
 {
@@ -42,6 +41,8 @@ typedef struct
    bool resize;
    unsigned width, height;
 } vivante_ctx_data_t;
+
+static enum gfx_ctx_api viv_api = GFX_CTX_NONE;
 
 static void gfx_ctx_vivante_destroy(void *data)
 {
@@ -59,7 +60,7 @@ static void gfx_ctx_vivante_destroy(void *data)
 
 }
 
-static void *gfx_ctx_vivante_init(void *video_driver)
+static void *gfx_ctx_vivante_init(video_frame_info_t *video_info, void *video_driver)
 {
 #ifdef HAVE_EGL
    EGLint n;
@@ -91,7 +92,7 @@ static void *gfx_ctx_vivante_init(void *video_driver)
    system("setterm -cursor off");
 
 #ifdef HAVE_EGL
-   if (!egl_init_context(&viv->egl, EGL_DEFAULT_DISPLAY, &major, &minor,
+   if (!egl_init_context(&viv->egl, EGL_NONE, EGL_DEFAULT_DISPLAY, &major, &minor,
             &n, attribs))
    {
       egl_report_error();
@@ -118,7 +119,8 @@ static void gfx_ctx_vivante_get_video_size(void *data,
 }
 
 static void gfx_ctx_vivante_check_window(void *data, bool *quit,
-      bool *resize, unsigned *width, unsigned *height, unsigned frame_count)
+      bool *resize, unsigned *width, unsigned *height,
+      bool is_shutdown)
 {
    unsigned new_width, new_height;
    vivante_ctx_data_t *viv = (vivante_ctx_data_t*)data;
@@ -137,30 +139,8 @@ static void gfx_ctx_vivante_check_window(void *data, bool *quit,
    *quit = (bool)frontend_driver_get_signal_handler_state();
 }
 
-static bool gfx_ctx_vivante_set_resize(void *data,
-      unsigned width, unsigned height)
-{
-   (void)data;
-   (void)width;
-   (void)height;
-   return false;
-}
-
-static void gfx_ctx_vivante_update_window_title(void *data)
-{
-   char buf[128]        = {0};
-   char buf_fps[128]    = {0};
-   settings_t *settings = config_get_ptr();
-
-   (void)data;
-
-   video_monitor_get_fps(buf, sizeof(buf),
-         buf_fps, sizeof(buf_fps));
-   if (settings->fps_show)
-      runloop_msg_queue_push(buf_fps, 1, 1, false);
-}
-
 static bool gfx_ctx_vivante_set_video_mode(void *data,
+      video_frame_info_t *video_info,
       unsigned width, unsigned height,
       bool fullscreen)
 {
@@ -205,18 +185,27 @@ error:
 }
 
 static void gfx_ctx_vivante_input_driver(void *data,
+      const char *name,
       const input_driver_t **input, void **input_data)
 {
-   (void)data;
-   *input = NULL;
+   *input      = NULL;
    *input_data = NULL;
+}
+
+static enum gfx_ctx_api gfx_ctx_vivante_get_api(void *data)
+{
+   return viv_api;
 }
 
 static bool gfx_ctx_vivante_bind_api(void *data,
       enum gfx_ctx_api api, unsigned major, unsigned minor)
 {
-   (void)data;
-   return api == GFX_CTX_OPENGL_ES_API;
+
+   viv_api = api;
+
+   if (api == GFX_CTX_OPENGL_ES_API)
+      return true;
+   return false;
 }
 
 static bool gfx_ctx_vivante_has_focus(void *data)
@@ -232,12 +221,6 @@ static bool gfx_ctx_vivante_suppress_screensaver(void *data, bool enable)
    return false;
 }
 
-static bool gfx_ctx_vivante_has_windowed(void *data)
-{
-   (void)data;
-   return false;
-}
-
 static void gfx_ctx_vivante_set_swap_interval(void *data, unsigned swap_interval)
 {
    vivante_ctx_data_t *viv = (vivante_ctx_data_t*)data;
@@ -247,7 +230,7 @@ static void gfx_ctx_vivante_set_swap_interval(void *data, unsigned swap_interval
 #endif
 }
 
-static void gfx_ctx_vivante_swap_buffers(void *data)
+static void gfx_ctx_vivante_swap_buffers(void *data, void *data2)
 {
    vivante_ctx_data_t *viv = (vivante_ctx_data_t*)data;
 
@@ -289,21 +272,23 @@ static void gfx_ctx_vivante_set_flags(void *data, uint32_t flags)
 const gfx_ctx_driver_t gfx_ctx_vivante_fbdev = {
    gfx_ctx_vivante_init,
    gfx_ctx_vivante_destroy,
+   gfx_ctx_vivante_get_api,
    gfx_ctx_vivante_bind_api,
    gfx_ctx_vivante_set_swap_interval,
    gfx_ctx_vivante_set_video_mode,
    gfx_ctx_vivante_get_video_size,
+   NULL, /* get_refresh_rate */
    NULL, /* get_video_output_size */
    NULL, /* get_video_output_prev */
    NULL, /* get_video_output_next */
    NULL, /* get_metrics */
    NULL,
-   gfx_ctx_vivante_update_window_title,
+   NULL, /* update_title */
    gfx_ctx_vivante_check_window,
-   gfx_ctx_vivante_set_resize,
+   NULL, /* set_resize */
    gfx_ctx_vivante_has_focus,
    gfx_ctx_vivante_suppress_screensaver,
-   gfx_ctx_vivante_has_windowed,
+   NULL, /* has_windowed */
    gfx_ctx_vivante_swap_buffers,
    gfx_ctx_vivante_input_driver,
    gfx_ctx_vivante_get_proc_address,

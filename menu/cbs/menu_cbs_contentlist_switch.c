@@ -1,5 +1,5 @@
 /*  RetroArch - A frontend for libretro.
- *  Copyright (C) 2011-2016 - Daniel De Matteis
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -27,6 +27,7 @@ static int deferred_push_content_list(void *data, void *userdata,
       const char *label, unsigned type)
 {
    file_list_t *selection_buf = menu_entries_get_selection_buf_ptr(0);
+   menu_navigation_set_selection(0);
    return action_refresh_default((file_list_t*)data, selection_buf);
 }
 

@@ -1,5 +1,5 @@
 /*  RetroArch - A frontend for libretro.
- *  Copyright (C) 2011-2016 - Daniel De Matteis
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -18,52 +18,54 @@
 #include <queues/message_queue.h>
 #include <retro_miscellaneous.h>
 
-#include "../../config.def.h"
 #include "../../gfx/font_driver.h"
-#include "../../gfx/video_context_driver.h"
+#include "../../gfx/video_driver.h"
 
-#include "../menu_display.h"
+#include "../menu_driver.h"
 
-static void *menu_display_null_get_default_mvp(void)
+static void *menu_display_null_get_default_mvp(video_frame_info_t *video_info)
 {
    return NULL;
 }
 
-static void menu_display_null_blend_begin(void)
+static void menu_display_null_blend_begin(video_frame_info_t *video_info)
 {
 }
 
-static void menu_display_null_blend_end(void)
+static void menu_display_null_blend_end(video_frame_info_t *video_info)
 {
 }
 
-static void menu_display_null_draw(void *data)
+static void menu_display_null_draw(menu_display_ctx_draw_t *draw,
+      video_frame_info_t *video_info)
 {
-   (void)data;
 }
 
-static void menu_display_null_draw_pipeline(void *data)
+static void menu_display_null_draw_pipeline(
+      menu_display_ctx_draw_t *draw, video_frame_info_t *video_info)
 {
-   (void)data;
 }
 
-static void menu_display_null_viewport(void *data)
+static void menu_display_null_viewport(menu_display_ctx_draw_t *draw,
+      video_frame_info_t *video_info)
 {
-   (void)data;
 }
 
 static void menu_display_null_restore_clear_color(void)
 {
 }
 
-static void menu_display_null_clear_color(menu_display_ctx_clearcolor_t *clearcolor)
+static void menu_display_null_clear_color(
+      menu_display_ctx_clearcolor_t *clearcolor,
+      video_frame_info_t *video_info)
 {
    (void)clearcolor;
 }
 
 static bool menu_display_null_font_init_first(
       void **font_handle, void *video_data,
-      const char *font_path, float font_size)
+      const char *font_path, float font_size,
+      bool is_threaded)
 {
    return true;
 }
@@ -94,4 +96,5 @@ menu_display_ctx_driver_t menu_display_ctx_null = {
    menu_display_null_font_init_first,
    MENU_VIDEO_DRIVER_GENERIC,
    "menu_display_null",
+   false
 };

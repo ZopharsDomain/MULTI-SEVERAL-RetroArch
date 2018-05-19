@@ -1,4 +1,4 @@
-/* Copyright  (C) 2010-2016 The RetroArch team
+/* Copyright  (C) 2010-2017 The RetroArch team
  *
  * ---------------------------------------------------------------------------------------
  * The following license statement only applies to this file (query.c).
@@ -101,7 +101,7 @@ static struct buffer query_parse_table(struct buffer buff,
 /* Errors */
 static void query_raise_too_many_arguments(const char **error)
 {
-   strlcpy(tmp_error_buff, 
+   strlcpy(tmp_error_buff,
          "Too many arguments in function call.", sizeof(tmp_error_buff));
    *error = tmp_error_buff;
 }
@@ -111,9 +111,8 @@ static struct rmsgpack_dom_value query_func_is_true(
       unsigned argc, const struct argument *argv)
 {
    struct rmsgpack_dom_value res;
-   memset(&res, 0, sizeof(res));
 
-   res.type  = RDT_BOOL;
+   res.type      = RDT_BOOL;
    res.val.bool_ = 0;
 
    if (argc > 0 || input.type != RDT_BOOL)
@@ -130,13 +129,11 @@ static struct rmsgpack_dom_value func_equals(
 {
    struct argument arg;
    struct rmsgpack_dom_value res;
-   memset(&res, 0, sizeof(res));
 
-   res.type = RDT_BOOL;
+   res.type      = RDT_BOOL;
+   res.val.bool_ = 0;
 
-   if (argc != 1)
-      res.val.bool_ = 0;
-   else
+   if (argc == 1)
    {
       arg = argv[0];
 
@@ -152,6 +149,7 @@ static struct rmsgpack_dom_value func_equals(
          res.val.bool_ = (rmsgpack_dom_value_cmp(&input, &arg.a.value) == 0);
       }
    }
+
    return res;
 }
 
@@ -161,9 +159,8 @@ static struct rmsgpack_dom_value query_func_operator_or(
 {
    unsigned i;
    struct rmsgpack_dom_value res;
-   memset(&res, 0, sizeof(res));
 
-   res.type = RDT_BOOL;
+   res.type      = RDT_BOOL;
    res.val.bool_ = 0;
 
    for (i = 0; i < argc; i++)
@@ -192,9 +189,8 @@ static struct rmsgpack_dom_value query_func_operator_and(
 {
    unsigned i;
    struct rmsgpack_dom_value res;
-   memset(&res, 0, sizeof(res));
 
-   res.type = RDT_BOOL;
+   res.type      = RDT_BOOL;
    res.val.bool_ = 0;
 
    for (i = 0; i < argc; i++)
@@ -224,9 +220,7 @@ static struct rmsgpack_dom_value query_func_between(
    struct rmsgpack_dom_value res;
    unsigned i                     = 0;
 
-   memset(&res, 0, sizeof(res));
-
-   res.type = RDT_BOOL;
+   res.type      = RDT_BOOL;
    res.val.bool_ = 0;
 
    (void)i;
@@ -242,12 +236,12 @@ static struct rmsgpack_dom_value query_func_between(
    {
       case RDT_INT:
          res.val.bool_ = (
-               (input.val.int_ >= argv[0].a.value.val.int_) 
+               (input.val.int_ >= argv[0].a.value.val.int_)
                && (input.val.int_ <= argv[1].a.value.val.int_));
          break;
       case RDT_UINT:
          res.val.bool_ = (
-               ((unsigned)input.val.int_ >= argv[0].a.value.val.uint_) 
+               ((unsigned)input.val.int_ >= argv[0].a.value.val.uint_)
                && (input.val.int_ <= argv[1].a.value.val.int_));
          break;
       default:
@@ -263,9 +257,8 @@ static struct rmsgpack_dom_value query_func_glob(
 {
    struct rmsgpack_dom_value res;
    unsigned i = 0;
-   memset(&res, 0, sizeof(res));
 
-   res.type = RDT_BOOL;
+   res.type      = RDT_BOOL;
    res.val.bool_ = 0;
 
    (void)i;
@@ -295,45 +288,26 @@ struct registered_func registered_functions[100] = {
 
 static void query_raise_expected_number(ssize_t where, const char **error)
 {
-#ifdef _WIN32
    snprintf(tmp_error_buff, MAX_ERROR_LEN,
-         "%I64u::Expected number",
-         (unsigned long long)where);
-#else
-   snprintf(tmp_error_buff, MAX_ERROR_LEN,
-         "%llu::Expected number",
-         (unsigned long long)where);
-#endif
+         "%" PRIu64 "::Expected number",
+         (uint64_t)where);
    *error = tmp_error_buff;
 }
 
 static void query_raise_expected_string(ssize_t where, const char ** error)
 {
-#ifdef _WIN32
    snprintf(tmp_error_buff, MAX_ERROR_LEN,
-         "%I64u::Expected string",
-         (unsigned long long)where);
-#else
-   snprintf(tmp_error_buff, MAX_ERROR_LEN,
-         "%llu::Expected string",
-         (unsigned long long)where);
-#endif
+         "%" PRIu64 "::Expected string",
+         (uint64_t)where);
    *error = tmp_error_buff;
 }
 
 static void query_raise_unexpected_eof(ssize_t where, const char ** error)
 {
-#ifdef _WIN32
    snprintf(tmp_error_buff, MAX_ERROR_LEN,
-         "%I64u::Unexpected EOF",
-         (unsigned long long)where
+         "%" PRIu64 "::Unexpected EOF",
+         (uint64_t)where
          );
-#else
-   snprintf(tmp_error_buff, MAX_ERROR_LEN,
-         "%llu::Unexpected EOF",
-         (unsigned long long)where
-         );
-#endif
    *error = tmp_error_buff;
 }
 
@@ -346,17 +320,10 @@ static void query_raise_enomem(const char **error)
 static void query_raise_unknown_function(ssize_t where, const char *name,
       ssize_t len, const char **error)
 {
-#ifdef _WIN32
    int n = snprintf(tmp_error_buff, MAX_ERROR_LEN,
-         "%I64u::Unknown function '",
-         (unsigned long long)where
+         "%" PRIu64 "::Unknown function '",
+         (uint64_t)where
          );
-#else
-   int n = snprintf(tmp_error_buff, MAX_ERROR_LEN,
-         "%llu::Unknown function '",
-         (unsigned long long)where
-         );
-#endif
 
    if (len < (MAX_ERROR_LEN - n - 3))
       strncpy(tmp_error_buff + n, name, len);
@@ -368,19 +335,11 @@ static void query_raise_unknown_function(ssize_t where, const char *name,
 static void query_raise_expected_eof(
       ssize_t where, char found, const char **error)
 {
-#ifdef _WIN32
    snprintf(tmp_error_buff, MAX_ERROR_LEN,
-         "%I64u::Expected EOF found '%c'",
-         (unsigned long long)where,
+         "%" PRIu64 "::Expected EOF found '%c'",
+         (uint64_t)where,
          found
          );
-#else
-   snprintf(tmp_error_buff, MAX_ERROR_LEN,
-         "%llu::Expected EOF found '%c'",
-         (unsigned long long)where,
-         found
-         );
-#endif
    *error = tmp_error_buff;
 }
 
@@ -388,15 +347,9 @@ static void query_raise_unexpected_char(
       ssize_t where, char expected, char found,
       const char **error)
 {
-#ifdef _WIN32
    snprintf(tmp_error_buff, MAX_ERROR_LEN,
-         "%I64u::Expected '%c' found '%c'",
-         (unsigned long long)where, expected, found);
-#else
-   snprintf(tmp_error_buff, MAX_ERROR_LEN,
-         "%llu::Expected '%c' found '%c'",
-         (unsigned long long)where, expected, found);
-#endif
+         "%" PRIu64 "::Expected '%c' found '%c'",
+         (uint64_t)where, expected, found);
    *error = tmp_error_buff;
 }
 
@@ -424,15 +377,9 @@ static struct buffer query_parse_integer(struct buffer buff,
 
    value->type = RDT_INT;
 
-#ifdef _WIN32
    test        = (sscanf(buff.data + buff.offset,
-            "%I64d",
-            (signed long long*)&value->val.int_) == 0);
-#else
-   test        = (sscanf(buff.data + buff.offset,
-            "%lld",
-            (signed long long*)&value->val.int_) == 0);
-#endif
+                         STRING_REP_INT64,
+                         (int64_t*)&value->val.int_) == 0);
 
    if (test)
       query_raise_expected_number(buff.offset, error);
@@ -447,7 +394,7 @@ static struct buffer query_parse_integer(struct buffer buff,
 
 static struct buffer query_chomp(struct buffer buff)
 {
-   for (; (unsigned)buff.offset < buff.len 
+   for (; (unsigned)buff.offset < buff.len
          && isspace((int)buff.data[buff.offset]); buff.offset++);
    return buff;
 }
@@ -532,10 +479,10 @@ static struct buffer query_parse_string(struct buffer buff,
    if (!*error)
    {
       size_t count;
-      value->type = is_binstr ? RDT_BINARY : RDT_STRING;
-      value->val.string.len = (buff.data + buff.offset) - str_start - 1;
+      value->type            = is_binstr ? RDT_BINARY : RDT_STRING;
+      value->val.string.len  = (uint32_t)((buff.data + buff.offset) - str_start - 1);
 
-      count                  = is_binstr ? (value->val.string.len + 1) / 2 
+      count                  = is_binstr ? (value->val.string.len + 1) / 2
          : (value->val.string.len + 1);
       value->val.string.buff = (char*)calloc(count, sizeof(char));
 
@@ -678,7 +625,7 @@ static struct buffer query_parse_argument(struct buffer buff,
                query_peek(buff, "nil")
             || query_peek(buff, "true")
             || query_peek(buff, "false")
-            || query_peek(buff, "b\"") 
+            || query_peek(buff, "b\"")
             || query_peek(buff,  "b'") /* bin string prefix*/
             )
       )
@@ -769,8 +716,8 @@ static struct buffer query_parse_method_call(struct buffer buff,
       goto clean;
 
    invocation->argc = argi;
-   invocation->argv = (struct argument*)
-      malloc(sizeof(struct argument) * argi);
+   invocation->argv = (argi > 0) ? (struct argument*)
+      malloc(sizeof(struct argument) * argi) : NULL;
 
    if (!invocation->argv)
    {
@@ -797,11 +744,11 @@ static struct rmsgpack_dom_value query_func_all_map(
    struct rmsgpack_dom_value res;
    struct rmsgpack_dom_value nil_value;
    struct rmsgpack_dom_value *value = NULL;
-   memset(&res, 0, sizeof(res));
+
+   res.type       = RDT_BOOL;
+   res.val.bool_  = 1;
 
    nil_value.type = RDT_NULL;
-   res.type       = RDT_BOOL;
-   res.val.bool_      = 1;
 
    if (argc % 2 != 0)
    {
@@ -873,8 +820,8 @@ static struct buffer query_parse_table(struct buffer buff,
 
          if (!*error)
          {
-            args[argi].a.value.type = RDT_STRING;
-            args[argi].a.value.val.string.len = ident_len;
+            args[argi].a.value.type            = RDT_STRING;
+            args[argi].a.value.val.string.len  = (uint32_t)ident_len;
             args[argi].a.value.val.string.buff = (char*)calloc(
                   ident_len + 1,
                   sizeof(char)

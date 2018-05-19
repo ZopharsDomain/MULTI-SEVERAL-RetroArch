@@ -1,8 +1,8 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
- *  Copyright (C) 2011-2016 - Daniel De Matteis
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
  *  Copyright (C) 2012-2015 - Michael Lelli
- *  Copyright (C) 2016 - Brad Parker
+ *  Copyright (C) 2016-2017 - Brad Parker
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -22,36 +22,33 @@
 #include "menu_generic.h"
 
 #include "../menu_driver.h"
-#include "../menu_display.h"
-#include "../menu_navigation.h"
 #include "../widgets/menu_dialog.h"
 #include "../widgets/menu_input_bind_dialog.h"
 
 #include "../../verbosity.h"
-#include "../../runloop.h"
 #include "../../content.h"
 #include "../../retroarch.h"
 
-static enum action_iterate_type action_iterate_type(uint32_t hash)
+static enum action_iterate_type action_iterate_type(const char *label)
 {
-   switch (hash)
-   {
-      case MENU_LABEL_HELP:
-      case MENU_LABEL_HELP_CONTROLS:
-      case MENU_LABEL_HELP_WHAT_IS_A_CORE:
-      case MENU_LABEL_HELP_LOADING_CONTENT:
-      case MENU_LABEL_HELP_CHANGE_VIRTUAL_GAMEPAD:
-      case MENU_LABEL_CHEEVOS_DESCRIPTION:
-      case MENU_LABEL_HELP_AUDIO_VIDEO_TROUBLESHOOTING:
-      case MENU_LABEL_HELP_SCANNING_CONTENT:
-         return ITERATE_TYPE_HELP;
-      case MENU_LABEL_INFO_SCREEN:
-         return ITERATE_TYPE_INFO;
-      case MENU_LABEL_CUSTOM_BIND:
-      case MENU_LABEL_CUSTOM_BIND_ALL:
-      case MENU_LABEL_CUSTOM_BIND_DEFAULTS:
+   if (string_is_equal(label, "info_screen"))
+      return ITERATE_TYPE_INFO;
+   if (
+         string_is_equal(label, "help") ||
+         string_is_equal(label, "help_controls") ||
+         string_is_equal(label, "help_what_is_a_core") ||
+         string_is_equal(label, "help_loading_content") ||
+         string_is_equal(label, "help_scanning_content") ||
+         string_is_equal(label, "help_change_virtual_gamepad") ||
+         string_is_equal(label, "help_audio_video_troubleshooting")
+         )
+      return ITERATE_TYPE_HELP;
+   if (
+         string_is_equal(label, "custom_bind") ||
+         string_is_equal(label, "custom_bind_all") ||
+         string_is_equal(label, "custom_bind_defaults")
+      )
          return ITERATE_TYPE_BIND;
-   }
 
    return ITERATE_TYPE_DEFAULT;
 }
@@ -69,26 +66,21 @@ static enum action_iterate_type action_iterate_type(uint32_t hash)
  **/
 int generic_menu_iterate(void *data, void *userdata, enum menu_action action)
 {
-   size_t selection;
-   menu_entry_t entry;
    enum action_iterate_type iterate_type;
    unsigned file_type             = 0;
-   const char *label              = NULL;
    int ret                        = 0;
-   uint32_t hash                  = 0;
    enum msg_hash_enums enum_idx   = MSG_UNKNOWN;
+   const char *label              = NULL;
    menu_handle_t *menu            = (menu_handle_t*)data;
 
    menu_entries_get_last_stack(NULL, &label, &file_type, &enum_idx, NULL);
 
    if (!menu)
       return 0;
-   if (!menu_navigation_ctl(MENU_NAVIGATION_CTL_GET_SELECTION, &selection))
-      return 0;
 
-   menu->menu_state.msg[0]   = '\0';
-   hash                      = msg_hash_calculate(label);
-   iterate_type              = action_iterate_type(hash);
+   menu->menu_state_msg[0]   = '\0';
+
+   iterate_type              = action_iterate_type(label);
 
    menu_driver_set_binding_state(iterate_type == ITERATE_TYPE_BIND);
 
@@ -103,7 +95,7 @@ int generic_menu_iterate(void *data, void *userdata, enum menu_action action)
    {
       case ITERATE_TYPE_HELP:
          ret = menu_dialog_iterate(
-               menu->menu_state.msg, sizeof(menu->menu_state.msg), label);
+               menu->menu_state_msg, sizeof(menu->menu_state_msg), label);
          BIT64_SET(menu->state, MENU_STATE_RENDER_MESSAGEBOX);
          BIT64_SET(menu->state, MENU_STATE_POST_ITERATE);
          if (ret == 1 || action == MENU_ACTION_OK)
@@ -122,14 +114,14 @@ int generic_menu_iterate(void *data, void *userdata, enum menu_action action)
          {
             menu_input_ctx_bind_t bind;
 
-            bind.s   = menu->menu_state.msg;
-            bind.len = sizeof(menu->menu_state.msg);
+            bind.s   = menu->menu_state_msg;
+            bind.len = sizeof(menu->menu_state_msg);
 
             if (menu_input_key_bind_iterate(&bind))
             {
+               size_t selection = menu_navigation_get_selection();
                menu_entries_pop_stack(&selection, 0, 0);
-               menu_navigation_ctl(
-                     MENU_NAVIGATION_CTL_SET_SELECTION, &selection);
+               menu_navigation_set_selection(selection);
             }
             else
                BIT64_SET(menu->state, MENU_STATE_RENDER_MESSAGEBOX);
@@ -138,18 +130,20 @@ int generic_menu_iterate(void *data, void *userdata, enum menu_action action)
       case ITERATE_TYPE_INFO:
          {
             file_list_t *selection_buf = menu_entries_get_selection_buf_ptr(0);
-            menu_file_list_cbs_t *cbs  =
-               menu_entries_get_actiondata_at_offset(selection_buf, selection);
+            size_t selection           = menu_navigation_get_selection();
+            menu_file_list_cbs_t *cbs  = selection_buf ?
+               (menu_file_list_cbs_t*)
+			   file_list_get_actiondata_at_offset(selection_buf, selection)
+               : NULL;
 
-            if (cbs->enum_idx != MSG_UNKNOWN)
-            {
+            if (cbs && cbs->enum_idx != MSG_UNKNOWN)
                ret = menu_hash_get_help_enum(cbs->enum_idx,
-                     menu->menu_state.msg, sizeof(menu->menu_state.msg));
-            }
+                     menu->menu_state_msg, sizeof(menu->menu_state_msg));
             else
             {
                unsigned type = 0;
                enum msg_hash_enums enum_idx = MSG_UNKNOWN;
+               size_t selection             = menu_navigation_get_selection();
                menu_entries_get_at_offset(selection_buf, selection,
                      NULL, NULL, &type, NULL, NULL);
 
@@ -210,7 +204,7 @@ int generic_menu_iterate(void *data, void *userdata, enum menu_action action)
 
                if (enum_idx != MSG_UNKNOWN)
                   ret = menu_hash_get_help_enum(enum_idx,
-                        menu->menu_state.msg, sizeof(menu->menu_state.msg));
+                        menu->menu_state_msg, sizeof(menu->menu_state_msg));
 
             }
          }
@@ -223,23 +217,29 @@ int generic_menu_iterate(void *data, void *userdata, enum menu_action action)
          menu_dialog_set_active(false);
          break;
       case ITERATE_TYPE_DEFAULT:
-         /* FIXME: Crappy hack, needed for mouse controls
-          * to not be completely broken in case we press back.
-          *
-          * We need to fix this entire mess, mouse controls
-          * should not rely on a hack like this in order to work. */
-         selection = MAX(MIN(selection, (menu_entries_get_size() - 1)), 0);
+         {
+            menu_entry_t entry;
+            size_t selection = menu_navigation_get_selection();
+            /* FIXME: Crappy hack, needed for mouse controls
+             * to not be completely broken in case we press back.
+             *
+             * We need to fix this entire mess, mouse controls
+             * should not rely on a hack like this in order to work. */
+            selection = MAX(MIN(selection, (menu_entries_get_size() - 1)), 0);
 
-         menu_entry_get(&entry, 0, selection, NULL, false);
-         ret = menu_entry_action(&entry, selection, (enum menu_action)action);
+            menu_entry_init(&entry);
+            menu_entry_get(&entry, 0, selection, NULL, false);
+            ret = menu_entry_action(&entry,
+                  (unsigned)selection, (enum menu_action)action);
+            menu_entry_free(&entry);
+            if (ret)
+               goto end;
 
-         if (ret)
-            goto end;
+            BIT64_SET(menu->state, MENU_STATE_POST_ITERATE);
 
-         BIT64_SET(menu->state, MENU_STATE_POST_ITERATE);
-
-         /* Have to defer it so we let settings refresh. */
-         menu_dialog_push();
+            /* Have to defer it so we let settings refresh. */
+            menu_dialog_push();
+         }
          break;
    }
 
@@ -247,9 +247,10 @@ int generic_menu_iterate(void *data, void *userdata, enum menu_action action)
 
    if (BIT64_GET(menu->state, MENU_STATE_POP_STACK))
    {
+      size_t selection         = menu_navigation_get_selection();
       size_t new_selection_ptr = selection;
       menu_entries_pop_stack(&new_selection_ptr, 0, 0);
-      menu_navigation_ctl(MENU_NAVIGATION_CTL_SET_SELECTION, &selection);
+      menu_navigation_set_selection(selection);
    }
 
    if (BIT64_GET(menu->state, MENU_STATE_POST_ITERATE))
@@ -263,15 +264,18 @@ end:
 
 bool generic_menu_init_list(void *data)
 {
-   menu_displaylist_info_t info = {0};
-   file_list_t *menu_stack    = menu_entries_get_menu_stack_ptr(0);
-   file_list_t *selection_buf = menu_entries_get_selection_buf_ptr(0);
+   menu_displaylist_info_t info;
+   file_list_t *menu_stack      = menu_entries_get_menu_stack_ptr(0);
+   file_list_t *selection_buf   = menu_entries_get_selection_buf_ptr(0);
 
-   strlcpy(info.label,
-         msg_hash_to_str(MENU_ENUM_LABEL_MAIN_MENU), sizeof(info.label));
+   menu_displaylist_info_init(&info);
+
+   info.label    = strdup(
+         msg_hash_to_str(MENU_ENUM_LABEL_MAIN_MENU));
    info.enum_idx = MENU_ENUM_LABEL_MAIN_MENU;
 
-   menu_entries_append_enum(menu_stack, info.path,
+   menu_entries_append_enum(menu_stack,
+         info.path,
          info.label,
          MENU_ENUM_LABEL_MAIN_MENU,
          info.type, info.flags, 0);
@@ -279,7 +283,9 @@ bool generic_menu_init_list(void *data)
    info.list  = selection_buf;
 
    if (menu_displaylist_ctl(DISPLAYLIST_MAIN_MENU, &info))
-      menu_displaylist_ctl(DISPLAYLIST_PROCESS, &info);
+      menu_displaylist_process(&info);
+
+   menu_displaylist_info_free(&info);
 
    return true;
 }

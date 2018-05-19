@@ -1,6 +1,6 @@
 /*  RetroArch - A frontend for libretro.
- *  Copyright (C) 2014-2016 - Jean-André Santoni
- *  Copyright (C) 2011-2016 - Daniel De Matteis
+ *  Copyright (C) 2014-2017 - Jean-André Santoni
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -31,18 +31,12 @@ typedef void  (*tween_cb)  (void);
 enum menu_animation_ctl_state
 {
    MENU_ANIMATION_CTL_NONE = 0,
-   MENU_ANIMATION_CTL_IS_ACTIVE,
    MENU_ANIMATION_CTL_DEINIT,
    MENU_ANIMATION_CTL_CLEAR_ACTIVE,
    MENU_ANIMATION_CTL_SET_ACTIVE,
    MENU_ANIMATION_CTL_DELTA_TIME,
-   MENU_ANIMATION_CTL_UPDATE_TIME,
-   MENU_ANIMATION_CTL_UPDATE,
    MENU_ANIMATION_CTL_KILL_BY_TAG,
-   MENU_ANIMATION_CTL_KILL_BY_SUBJECT,
-   MENU_ANIMATION_CTL_TICKER,
-   MENU_ANIMATION_CTL_PUSH,
-   MENU_ANIMATION_CTL_IDEAL_DELTA_TIME_GET
+   MENU_ANIMATION_CTL_KILL_BY_SUBJECT
 };
 
 enum menu_animation_easing_type
@@ -88,7 +82,9 @@ enum menu_animation_easing_type
    EASING_IN_BOUNCE,
    EASING_OUT_BOUNCE,
    EASING_IN_OUT_BOUNCE,
-   EASING_OUT_IN_BOUNCE
+   EASING_OUT_IN_BOUNCE,
+
+   EASING_LAST
 };
 
 typedef struct menu_animation_ctx_delta
@@ -97,10 +93,7 @@ typedef struct menu_animation_ctx_delta
    float ideal;
 } menu_animation_ctx_delta_t;
 
-typedef struct menu_animation_ctx_tag
-{
-   int id;
-} menu_animation_ctx_tag_t;
+typedef uintptr_t menu_animation_ctx_tag;
 
 typedef struct menu_animation_ctx_subject
 {
@@ -110,22 +103,34 @@ typedef struct menu_animation_ctx_subject
 
 typedef struct menu_animation_ctx_entry
 {
+   enum menu_animation_easing_type easing_enum;
+   uintptr_t tag;
    float duration;
    float target_value;
    float *subject;
-   enum menu_animation_easing_type easing_enum;
-   int tag;
    tween_cb cb;
 } menu_animation_ctx_entry_t;
 
 typedef struct menu_animation_ctx_ticker
 {
-   char *s;
+   bool selected;
    size_t len;
    uint64_t idx;
+   char *s;
    const char *str;
-   bool selected;
 } menu_animation_ctx_ticker_t;
+
+bool menu_animation_update(float delta_time);
+
+bool menu_animation_get_ideal_delta_time(menu_animation_ctx_delta_t *delta);
+
+bool menu_animation_ticker(const menu_animation_ctx_ticker_t *ticker);
+
+void menu_animation_update_time(bool timedate_enable);
+
+bool menu_animation_is_active(void);
+
+bool menu_animation_push(menu_animation_ctx_entry_t *entry);
 
 bool menu_animation_ctl(enum menu_animation_ctl_state state, void *data);
 

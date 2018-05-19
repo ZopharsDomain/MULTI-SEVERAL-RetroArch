@@ -1,5 +1,5 @@
 /*  RetroArch - A frontend for libretro.
- *  Copyright (C) 2014-2016 - Ali Bouhlel
+ *  Copyright (C) 2014-2017 - Ali Bouhlel
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -18,9 +18,6 @@
 #include <malloc.h>
 
 #include "../audio_driver.h"
-#include "../../configuration.h"
-#include "../../performance_counters.h"
-#include "../../runloop.h"
 #include "../../ctr/ctr_debug.h"
 
 typedef struct
@@ -38,10 +35,11 @@ typedef struct
 #define CTR_DSP_AUDIO_SIZE        (CTR_DSP_AUDIO_COUNT * sizeof(int16_t) * 2)
 #define CTR_DSP_AUDIO_SIZE_MASK   (CTR_DSP_AUDIO_SIZE  - 1u)
 
-static void *ctr_dsp_audio_init(const char *device, unsigned rate, unsigned latency)
+static void *ctr_dsp_audio_init(const char *device, unsigned rate, unsigned latency,
+      unsigned block_frames,
+      unsigned *new_rate)
 {
    ctr_dsp_audio_t *ctr = NULL;
-   settings_t *settings = config_get_ptr();
 
    (void)device;
    (void)rate;
@@ -55,12 +53,12 @@ static void *ctr_dsp_audio_init(const char *device, unsigned rate, unsigned late
    if (!ctr)
       return NULL;
 
-   settings->audio.out_rate  = 32730;
+   *new_rate    = 32730;
 
    ctr->channel = 0;
 
    ndspSetOutputMode(NDSP_OUTPUT_STEREO);
-   ndspSetClippingMode(NDSP_CLIP_SOFT); //??
+   ndspSetClippingMode(NDSP_CLIP_SOFT); /* ?? */
    ndspSetOutputCount(1);
    ndspChnReset(ctr->channel);
    ndspChnSetFormat(ctr->channel, NDSP_FORMAT_STEREO_PCM16);
@@ -97,7 +95,6 @@ static void ctr_dsp_audio_free(void *data)
 static ssize_t ctr_dsp_audio_write(void *data, const void *buf, size_t size)
 {
    u32 pos;
-   static struct retro_perf_counter ctraudio_dsp_f = {0};
    ctr_dsp_audio_t                           * ctr = (ctr_dsp_audio_t*)data;
    uint32_t sample_pos                             = ndspChnGetSamplePos(ctr->channel);
 
@@ -116,9 +113,6 @@ static ssize_t ctr_dsp_audio_write(void *data, const void *buf, size_t size)
                  || (((ctr->pos - (CTR_DSP_AUDIO_COUNT >> 4) - sample_pos) & CTR_DSP_AUDIO_COUNT_MASK) > (CTR_DSP_AUDIO_COUNT >> 1)));
       }
    }
-
-   performance_counter_init(&ctraudio_dsp_f, "ctraudio_dsp_f");
-   performance_counter_start(&ctraudio_dsp_f);
 
    pos = ctr->pos << 2;
 
@@ -141,8 +135,6 @@ static ssize_t ctr_dsp_audio_write(void *data, const void *buf, size_t size)
    ctr->pos += size >> 2;
    ctr->pos &= CTR_DSP_AUDIO_COUNT_MASK;
 
-   performance_counter_stop(&ctraudio_dsp_f);
-
    return size;
 }
 
@@ -162,14 +154,13 @@ static bool ctr_dsp_audio_alive(void *data)
    return ctr->playing;
 }
 
-static bool ctr_dsp_audio_start(void *data)
+static bool ctr_dsp_audio_start(void *data, bool is_shutdown)
 {
    ctr_dsp_audio_t* ctr = (ctr_dsp_audio_t*)data;
 
    /* Prevents restarting audio when the menu
     * is toggled off on shutdown */
-
-   if (runloop_ctl(RUNLOOP_CTL_IS_SHUTDOWN, NULL))
+   if (is_shutdown)
       return true;
 
    ndspSetMasterVol(1.0);

@@ -1,7 +1,7 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
- *  Copyright (C) 2011-2016 - Daniel De Matteis
- * 
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
+ *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
  *  ation, either version 3 of the License, or (at your option) any later version.
@@ -41,6 +41,8 @@ typedef struct ui_window_win32
 {
    HWND hwnd;
 } ui_window_win32_t;
+
+extern VOID (WINAPI *DragAcceptFiles_func)(HWND, BOOL);
 
 RETRO_END_DECLS
 

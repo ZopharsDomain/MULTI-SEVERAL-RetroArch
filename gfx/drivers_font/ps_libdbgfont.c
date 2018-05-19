@@ -1,7 +1,7 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
- *  Copyright (C) 2011-2016 - Daniel De Matteis
- * 
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
+ *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
  *  ation, either version 3 of the License, or (at your option) any later version.
@@ -31,7 +31,8 @@
 
 #include "../font_driver.h"
 
-static void *libdbg_font_init_font(void *gl_data, const char *font_path, float font_size)
+static void *libdbg_font_init_font(void *gl_data, const char *font_path,
+      float font_size, bool is_threaded)
 {
    unsigned width, height;
 
@@ -57,35 +58,34 @@ static void *libdbg_font_init_font(void *gl_data, const char *font_path, float f
    return (void*)-1;
 }
 
-static void libdbg_font_free_font(void *data)
+static void libdbg_font_free_font(void *data, bool is_threaded)
 {
    (void)data;
    DbgFontExit();
 }
 
-static void libdbg_font_render_msg(void *data, const char *msg,
-      const void *userdata)
+static void libdbg_font_render_msg(
+      video_frame_info_t *video_info,
+      void *data, const char *msg,
+      const struct font_params *params)
 {
    float x, y, scale;
    unsigned color;
-   settings_t *settings = config_get_ptr();
-   const struct font_params *params = (const struct font_params*)userdata;
-
-   (void)data;
 
    if (params)
    {
-      x     = params->x;
-      y     = params->y;
-      scale = params->scale;
-      color = params->color;
+      x                    = params->x;
+      y                    = params->y;
+      scale                = params->scale;
+
+      color                = params->color;
    }
    else
    {
-      x     = settings->video.msg_pos_x;
-      y     = 0.90f;
-      scale = 1.04f;
-      color = SILVER;
+      x                    = video_info->font_msg_pos_x;
+      y                    = 0.90f;
+      scale                = 1.04f;
+      color                = SILVER;
    }
 
    DbgFontPrint(x, y, scale, color, msg);
@@ -94,7 +94,7 @@ static void libdbg_font_render_msg(void *data, const char *msg,
       DbgFontPrint(x, y, scale - 0.01f, WHITE, msg);
 
 #ifdef SN_TARGET_PSP2
-   /* FIXME - if we ever get around to this port, 
+   /* FIXME - if we ever get around to this port,
     * move this out to some better place */
    sceDbgFontFlush();
 #endif

@@ -1,6 +1,6 @@
 /*  RetroArch - A frontend for libretro.
- *  Copyright (C) 2011-2016 - Daniel De Matteis
- * 
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
+ *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
  *  ation, either version 3 of the License, or (at your option) any later version.
@@ -28,8 +28,7 @@ enum rarch_dir_type
    RARCH_DIR_SAVESTATE,
    RARCH_DIR_CURRENT_SAVEFILE,
    RARCH_DIR_CURRENT_SAVESTATE,
-   RARCH_DIR_SYSTEM,
-   RARCH_DIR_OSK_OVERLAY
+   RARCH_DIR_SYSTEM
 };
 
 bool dir_init_shader(void);

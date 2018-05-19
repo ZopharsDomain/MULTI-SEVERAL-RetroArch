@@ -1,5 +1,5 @@
 /*  RetroArch - A frontend for libretro.
- *  Copyright (C) 2014-2016 - Ali Bouhlel
+ *  Copyright (C) 2014-2017 - Ali Bouhlel
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -20,16 +20,20 @@
 #include <3ds.h>
 
 #include <retro_inline.h>
+#include <retro_math.h>
 #include <formats/image.h>
 
 #ifdef HAVE_CONFIG_H
 #include "../../config.h"
 #endif
 
+#ifdef HAVE_MENU
+#include "../../menu/menu_driver.h"
+#endif
+
+#include "../font_driver.h"
 #include "../../ctr/gpu_old.h"
 #include "ctr_gu.h"
-
-#include "../../menu/menu_driver.h"
 
 #include "../../configuration.h"
 #include "../../command.h"
@@ -37,7 +41,6 @@
 
 #include "../../retroarch.h"
 #include "../../verbosity.h"
-#include "../../performance_counters.h"
 
 #include "../common/ctr_common.h"
 #ifndef HAVE_THREADS
@@ -46,7 +49,7 @@
 
 static INLINE void ctr_check_3D_slider(ctr_video_t* ctr)
 {
-   float slider_val = *(float*)0x1FF81080;
+   float slider_val             = *(float*)0x1FF81080;
    ctr_video_mode_enum old_mode = ctr->video_mode;
 
    if (slider_val == 0.0)
@@ -62,27 +65,27 @@ static INLINE void ctr_check_3D_slider(ctr_video_t* ctr)
    {
       switch (ctr->video_mode)
       {
-      case CTR_VIDEO_MODE_800x240:
-      case CTR_VIDEO_MODE_400x240:
-         ctr_set_parallax_layer(false);
-         break;
-      case CTR_VIDEO_MODE_3D:
-      {
-         s16 offset = (slider_val - 0.6) * 10.0;
-         ctr->frame_coords[1] = ctr->frame_coords[0];
-         ctr->frame_coords[2] = ctr->frame_coords[0];
+         case CTR_VIDEO_MODE_800x240:
+         case CTR_VIDEO_MODE_400x240:
+            ctr_set_parallax_layer(false);
+            break;
+         case CTR_VIDEO_MODE_3D:
+            {
+               s16 offset = (slider_val - 0.6) * 10.0;
+               ctr->frame_coords[1] = ctr->frame_coords[0];
+               ctr->frame_coords[2] = ctr->frame_coords[0];
 
-         ctr->frame_coords[1].x0 -= offset;
-         ctr->frame_coords[1].x1 -= offset;
-         ctr->frame_coords[2].x0 += offset;
-         ctr->frame_coords[2].x1 += offset;
+               ctr->frame_coords[1].x0 -= offset;
+               ctr->frame_coords[1].x1 -= offset;
+               ctr->frame_coords[2].x0 += offset;
+               ctr->frame_coords[2].x1 += offset;
 
-         GSPGPU_FlushDataCache(ctr->frame_coords, 3 * sizeof(ctr_vertex_t));
-         ctr_set_parallax_layer(true);
-         break;
-      }
-      default:
-         break;
+               GSPGPU_FlushDataCache(ctr->frame_coords, 3 * sizeof(ctr_vertex_t));
+               ctr_set_parallax_layer(true);
+               break;
+            }
+         default:
+            break;
       }
    }
 }
@@ -98,9 +101,9 @@ static INLINE void ctr_set_screen_coords(ctr_video_t * ctr)
    }
    else if (ctr->rotation == 1) /* 90° */
    {
-      ctr->frame_coords->x1 = ctr->vp.x;
+      ctr->frame_coords->x0 = ctr->vp.x;
       ctr->frame_coords->y0 = ctr->vp.y;
-      ctr->frame_coords->x0 = ctr->vp.x + ctr->vp.width;
+      ctr->frame_coords->x1 = ctr->vp.x + ctr->vp.width;
       ctr->frame_coords->y1 = ctr->vp.y + ctr->vp.height;
    }
    else if (ctr->rotation == 2) /* 180° */
@@ -112,15 +115,15 @@ static INLINE void ctr_set_screen_coords(ctr_video_t * ctr)
    }
    else /* 270° */
    {
-      ctr->frame_coords->x0 = ctr->vp.x;
+      ctr->frame_coords->x1 = ctr->vp.x;
       ctr->frame_coords->y1 = ctr->vp.y;
-      ctr->frame_coords->x1 = ctr->vp.x + ctr->vp.width;
+      ctr->frame_coords->x0 = ctr->vp.x + ctr->vp.width;
       ctr->frame_coords->y0 = ctr->vp.y + ctr->vp.height;
    }
 }
 
 
-static void ctr_update_viewport(ctr_video_t* ctr)
+static void ctr_update_viewport(ctr_video_t* ctr, video_frame_info_t *video_info)
 {
    int x                = 0;
    int y                = 0;
@@ -132,7 +135,7 @@ static void ctr_update_viewport(ctr_video_t* ctr)
    if(ctr->rotation & 0x1)
       desired_aspect = 1.0 / desired_aspect;
 
-   if (settings->video.scale_integer)
+   if (settings->bools.video_scale_integer)
    {
       video_viewport_get_scaled_integer(&ctr->vp, ctr->vp.full_width,
             ctr->vp.full_height, desired_aspect, ctr->keep_aspect);
@@ -140,17 +143,12 @@ static void ctr_update_viewport(ctr_video_t* ctr)
    else if (ctr->keep_aspect)
    {
 #if defined(HAVE_MENU)
-      if (settings->video.aspect_ratio_idx == ASPECT_RATIO_CUSTOM)
+      if (settings->uints.video_aspect_ratio_idx == ASPECT_RATIO_CUSTOM)
       {
-         struct video_viewport *custom = video_viewport_get_custom();
-
-         if (custom)
-         {
-            x      = custom->x;
-            y      = custom->y;
-            width  = custom->width;
-            height = custom->height;
-         }
+         x      = video_info->custom_vp_x;
+         y      = video_info->custom_vp_y;
+         width  = video_info->custom_vp_width;
+         height = video_info->custom_vp_height;
       }
       else
 #endif
@@ -240,7 +238,7 @@ static void ctr_lcd_aptHook(APT_HookType hook, void* param)
                                CTRGU_ATTRIBFMT(GPU_SHORT, 4) << 0 |
                                CTRGU_ATTRIBFMT(GPU_SHORT, 4) << 4,
                                sizeof(ctr_vertex_t));
-      GPUCMD_Finalize();
+      GPU_Finalize();
       ctrGuFlushAndRun(true);
       gspWaitForEvent(GSPGPU_EVENT_P3D, false);
       ctr->p3d_event_pending = false;
@@ -291,13 +289,11 @@ static void* ctr_init(const video_info_t* video,
    float refresh_rate;
    void* ctrinput   = NULL;
    ctr_video_t* ctr = (ctr_video_t*)linearAlloc(sizeof(ctr_video_t));
-   settings_t *settings = config_get_ptr();
 
    if (!ctr)
       return NULL;
 
    memset(ctr, 0, sizeof(ctr_video_t));
-
 
    ctr->vp.x                = 0;
    ctr->vp.y                = 0;
@@ -364,7 +360,9 @@ static void* ctr_init(const video_info_t* video,
                         ctr->menu.texture_width, ctr->menu.texture_height);
 
    memset(ctr->texture_linear, 0x00, ctr->texture_width * ctr->texture_height * (ctr->rgb32? 4:2));
-//   memset(ctr->menu.texture_swizzled , 0x00, ctr->menu.texture_width * ctr->menu.texture_height * 2);
+#if 0
+   memset(ctr->menu.texture_swizzled , 0x00, ctr->menu.texture_width * ctr->menu.texture_height * 2);
+#endif
 
    ctr->dvlb = DVLB_ParseFile((u32*)ctr_sprite_shbin, ctr_sprite_shbin_size);
    ctrGuSetVshGsh(&ctr->shader, ctr->dvlb, 2, 2);
@@ -379,9 +377,13 @@ static void* ctr_init(const video_info_t* video,
    GPU_SetStencilTest(false, GPU_ALWAYS, 0x00, 0xFF, 0x00);
    GPU_SetStencilOp(GPU_STENCIL_KEEP, GPU_STENCIL_KEEP, GPU_STENCIL_KEEP);
    GPU_SetBlendingColor(0, 0, 0, 0);
-//      GPU_SetDepthTestAndWriteMask(true, GPU_GREATER, GPU_WRITE_ALL);
+#if 0
+   GPU_SetDepthTestAndWriteMask(true, GPU_GREATER, GPU_WRITE_ALL);
+#endif
    GPU_SetDepthTestAndWriteMask(false, GPU_ALWAYS, GPU_WRITE_COLOR);
-   //   GPU_SetDepthTestAndWriteMask(true, GPU_ALWAYS, GPU_WRITE_ALL);
+#if 0
+   GPU_SetDepthTestAndWriteMask(true, GPU_ALWAYS, GPU_WRITE_ALL);
+#endif
 
    GPUCMD_AddMaskedWrite(GPUREG_EARLYDEPTH_TEST1, 0x1, 0);
    GPUCMD_AddWrite(GPUREG_EARLYDEPTH_TEST2, 0);
@@ -405,17 +407,18 @@ static void* ctr_init(const video_info_t* video,
                             CTRGU_ATTRIBFMT(GPU_SHORT, 4) << 0 |
                             CTRGU_ATTRIBFMT(GPU_SHORT, 4) << 4,
                             sizeof(ctr_vertex_t));
-   GPUCMD_Finalize();
+   GPU_Finalize();
    ctrGuFlushAndRun(true);
-//   gspWaitForEvent(GSPGPU_EVENT_P3D, false);
+
    ctr->p3d_event_pending = true;
    ctr->ppf_event_pending = false;
 
    if (input && input_data)
    {
-      ctrinput = input_ctr.init();
-      *input = ctrinput ? &input_ctr : NULL;
-      *input_data = ctrinput;
+      settings_t *settings = config_get_ptr();
+      ctrinput             = input_ctr.init(settings->arrays.input_joypad_driver);
+      *input               = ctrinput ? &input_ctr : NULL;
+      *input_data          = ctrinput;
    }
 
    ctr->keep_aspect   = true;
@@ -433,7 +436,9 @@ static void* ctr_init(const video_info_t* video,
    driver_ctl(RARCH_DRIVER_CTL_SET_REFRESH_RATE, &refresh_rate);
    aptHook(&ctr->lcd_aptHook, ctr_lcd_aptHook, ctr);
 
-   font_driver_init_osd(ctr, false, FONT_DRIVER_RENDER_CTR);
+   font_driver_init_osd(ctr, false,
+         video->is_threaded,
+         FONT_DRIVER_RENDER_CTR);
 
    ctr->msg_rendering_enabled = false;
    ctr->menu_texture_frame_enable = false;
@@ -444,21 +449,26 @@ static void* ctr_init(const video_info_t* video,
    return ctr;
 }
 
+#if 0
+#define CTR_INSPECT_MEMORY_USAGE
+#endif
+
 static bool ctr_frame(void* data, const void* frame,
       unsigned width, unsigned height,
       uint64_t frame_count,
-      unsigned pitch, const char* msg)
+      unsigned pitch, const char* msg, video_frame_info_t *video_info)
 {
    uint32_t diff;
    static uint64_t currentTick,lastTick;
+   touchPosition state_tmp_touch;
+   extern GSPGPU_FramebufferInfo topFramebufferInfo;
+   extern u8* gfxSharedMemory;
+   extern u8 gfxThreadID;
+   uint32_t state_tmp      = 0;
    ctr_video_t       *ctr  = (ctr_video_t*)data;
-   settings_t   *settings  = config_get_ptr();
    static float        fps = 0.0;
    static int total_frames = 0;
    static int       frames = 0;
-   static struct retro_perf_counter ctrframe_f = {0};
-   uint32_t state_tmp;
-   touchPosition state_tmp_touch;
 
    extern bool select_pressed;
 
@@ -517,14 +527,18 @@ static bool ctr_frame(void* data, const void* frame,
    }
    frames++;
 #ifndef HAVE_THREADS
-   if(task_queue_ctl(TASK_QUEUE_CTL_FIND, &ctr_tasks_finder_data))
+   if(task_queue_find(&ctr_tasks_finder_data))
    {
-//      ctr->vsync_event_pending = true;
+#if 0
+      ctr->vsync_event_pending = true;
+#endif
       while(ctr->vsync_event_pending)
       {
-         task_queue_ctl(TASK_QUEUE_CTL_CHECK, NULL);
+         task_queue_check();
          svcSleepThread(0);
-//         aptMainLoop();
+#if 0
+         aptMainLoop();
+#endif
       }
    }
 #endif
@@ -542,7 +556,6 @@ static bool ctr_frame(void* data, const void* frame,
       frames = 0;
    }
 
-//#define CTR_INSPECT_MEMORY_USAGE
 
 #ifdef CTR_INSPECT_MEMORY_USAGE
    uint32_t ctr_get_stack_usage(void);
@@ -562,12 +575,14 @@ static bool ctr_frame(void* data, const void* frame,
       if(query_addr == 0x1F000000)
          query_addr = 0x30000000;
    }
-//   static u32* dummy_pointer;
-//   if(total_frames == 500)
-//      dummy_pointer = malloc(0x2000000);
-//   if(total_frames == 1000)
-//      free(dummy_pointer);
 
+#if 0
+   static u32* dummy_pointer;
+   if(total_frames == 500)
+      dummy_pointer = malloc(0x2000000);
+   if(total_frames == 1000)
+      free(dummy_pointer);
+#endif
 
    printf("========================================");
    printf("0x%08X 0x%08X 0x%08X\n", __heap_size, gpuCmdBufOffset, (__linear_heap_size - linearSpaceFree()));
@@ -593,11 +608,8 @@ static bool ctr_frame(void* data, const void* frame,
 #endif
    fflush(stdout);
 
-   performance_counter_init(&ctrframe_f, "ctrframe_f");
-   performance_counter_start(&ctrframe_f);
-
    if (ctr->should_resize)
-      ctr_update_viewport(ctr);
+      ctr_update_viewport(ctr, video_info);
 
    ctrGuSetMemoryFill(true, (u32*)ctr->drawbuffers.top.left, 0x00000000,
                     (u32*)ctr->drawbuffers.top.left + 2 * CTR_TOP_FRAMEBUFFER_WIDTH * CTR_TOP_FRAMEBUFFER_HEIGHT,
@@ -620,10 +632,12 @@ static bool ctr_frame(void* data, const void* frame,
          && (pitch > 0x40))
       {
          /* can copy the buffer directly with the GPU */
-//         GSPGPU_FlushDataCache(frame, pitch * height);
+#if 0
+         GSPGPU_FlushDataCache(frame, pitch * height);
+#endif
          ctrGuSetCommandList_First(true,(void*)frame, pitch * height,0,0,0,0);
          ctrGuCopyImage(true, frame, pitch / (ctr->rgb32? 4: 2), height, ctr->rgb32 ? CTRGU_RGBA8: CTRGU_RGB565, false,
-                        ctr->texture_swizzled, ctr->texture_width, ctr->rgb32 ? CTRGU_RGBA8: CTRGU_RGB565,  true);
+               ctr->texture_swizzled, ctr->texture_width, ctr->rgb32 ? CTRGU_RGBA8: CTRGU_RGB565,  true);
       }
       else
       {
@@ -661,7 +675,7 @@ static bool ctr_frame(void* data, const void* frame,
 
    ctr_check_3D_slider(ctr);
 
-//   /* ARGB --> RGBA */
+   /* ARGB --> RGBA  */
    if (ctr->rgb32)
    {
       GPU_SetTexEnv(0,
@@ -723,6 +737,7 @@ static bool ctr_frame(void* data, const void* frame,
       GPU_SetTexEnv(2, GPU_PREVIOUS, GPU_PREVIOUS, 0, 0, 0, 0, 0);
    }
 
+#ifdef HAVE_MENU
    if (ctr->menu_texture_enable)
    {
       if(ctr->menu_texture_frame_enable)
@@ -752,20 +767,32 @@ static bool ctr_frame(void* data, const void* frame,
       }
 
       ctr->msg_rendering_enabled = true;
-      menu_driver_ctl(RARCH_MENU_CTL_FRAME, NULL);
+      menu_driver_frame(video_info);
       ctr->msg_rendering_enabled = false;
 
    }
+   else if (video_info->statistics_show)
+   {
+      struct font_params *osd_params = (struct font_params*)
+         &video_info->osd_stat_params;
 
-   if (font_driver_has_render_msg() && msg)
-      font_driver_render_msg(NULL, msg, NULL);
+      if (osd_params)
+      {
+         font_driver_render_msg(video_info, NULL, video_info->stat_text,
+               (const struct font_params*)&video_info->osd_stat_params);
+      }
+   }
+#endif
 
-//   font_driver_render_msg(NULL, "TEST: 123 ABC àüî", NULL);
+   if (msg)
+      font_driver_render_msg(video_info, NULL, msg, NULL);
 
-
+#if 0
+   font_driver_render_msg(video_info, NULL, "TEST: 123 ABC àüî", NULL);
+#endif
 
    GPU_FinishDrawing();
-   GPUCMD_Finalize();
+   GPU_Finalize();
    ctrGuFlushAndRun(true);
 
    ctrGuDisplayTransfer(true, ctr->drawbuffers.top.left,
@@ -783,39 +810,44 @@ static bool ctr_frame(void* data, const void* frame,
                            gfxTopRightFramebuffers[ctr->current_buffer_top], 240,CTRGU_RGB8, CTRGU_MULTISAMPLE_NONE);
 
 
-   // Swap buffers :
-   extern GSPGPU_FramebufferInfo topFramebufferInfo;
-   extern u8* gfxSharedMemory;
-   extern u8 gfxThreadID;
+   /* Swap buffers : */
 
-   topFramebufferInfo.active_framebuf=ctr->current_buffer_top;
-   topFramebufferInfo.framebuf0_vaddr=(u32*)gfxTopLeftFramebuffers[ctr->current_buffer_top];
+   topFramebufferInfo.
+      active_framebuf           = ctr->current_buffer_top;
+   topFramebufferInfo.
+      framebuf0_vaddr           = (u32*)gfxTopLeftFramebuffers[ctr->current_buffer_top];
+
    if(ctr->video_mode == CTR_VIDEO_MODE_800x240)
    {
-      topFramebufferInfo.framebuf1_vaddr=(u32*)(gfxTopLeftFramebuffers[ctr->current_buffer_top] + 240 * 3);
-      topFramebufferInfo.framebuf_widthbytesize = 240 * 3 * 2;
+      topFramebufferInfo.
+         framebuf1_vaddr        = (u32*)(gfxTopLeftFramebuffers[ctr->current_buffer_top] + 240 * 3);
+      topFramebufferInfo.
+         framebuf_widthbytesize = 240 * 3 * 2;
    }
    else
    {
-      topFramebufferInfo.framebuf1_vaddr=(u32*)gfxTopRightFramebuffers[ctr->current_buffer_top];
-      topFramebufferInfo.framebuf_widthbytesize = 240 * 3;
+      topFramebufferInfo.
+         framebuf1_vaddr        = (u32*)gfxTopRightFramebuffers[ctr->current_buffer_top];
+      topFramebufferInfo.
+         framebuf_widthbytesize = 240 * 3;
    }
 
 
-   topFramebufferInfo.format=(1<<8)|(1<<5)|GSP_BGR8_OES;
-   topFramebufferInfo.framebuf_dispselect=ctr->current_buffer_top;
-   topFramebufferInfo.unk=0x00000000;
+   topFramebufferInfo.format    = (1<<8)|(1<<5)|GSP_BGR8_OES;
+   topFramebufferInfo.
+      framebuf_dispselect       = ctr->current_buffer_top;
+   topFramebufferInfo.unk       = 0x00000000;
 
-   u8* framebufferInfoHeader=gfxSharedMemory+0x200+gfxThreadID*0x80;
-	GSPGPU_FramebufferInfo* framebufferInfo=(GSPGPU_FramebufferInfo*)&framebufferInfoHeader[0x4];
-	framebufferInfoHeader[0x0] ^= 1;
+   u8* framebufferInfoHeader    = gfxSharedMemory+0x200+gfxThreadID*0x80;
+	GSPGPU_FramebufferInfo*
+      framebufferInfo           = (GSPGPU_FramebufferInfo*)&framebufferInfoHeader[0x4];
+	framebufferInfoHeader[0x0]  ^= 1;
 	framebufferInfo[framebufferInfoHeader[0x0]] = topFramebufferInfo;
-	framebufferInfoHeader[0x1]=1;
+	framebufferInfoHeader[0x1]   = 1;
 
-   ctr->current_buffer_top ^= 1;
-   ctr->p3d_event_pending = true;
-   ctr->ppf_event_pending = true;
-   performance_counter_stop(&ctrframe_f);
+   ctr->current_buffer_top     ^= 1;
+   ctr->p3d_event_pending       = true;
+   ctr->ppf_event_pending       = true;
 
    return true;
 }
@@ -847,12 +879,6 @@ static bool ctr_suppress_screensaver(void* data, bool enable)
    return false;
 }
 
-static bool ctr_has_windowed(void* data)
-{
-   (void)data;
-   return false;
-}
-
 static void ctr_free(void* data)
 {
    ctr_video_t* ctr = (ctr_video_t*)data;
@@ -875,7 +901,9 @@ static void ctr_free(void* data)
    linearFree(ctr->empty_framebuffer);
    linearFree(ctr->vertex_cache.buffer);
    linearFree(ctr);
-   //   gfxExit();
+#if 0
+   gfxExit();
+#endif
 }
 static void ctr_set_texture_frame(void* data, const void* frame, bool rgb32,
                                   unsigned width, unsigned height, float alpha)
@@ -1093,36 +1121,41 @@ static void ctr_unload_texture(void *data, uintptr_t handle)
    free(texture);
 }
 
-static void ctr_set_osd_msg(void *data, const char *msg,
-      const struct font_params *params, void *font)
+static void ctr_set_osd_msg(void *data,
+      video_frame_info_t *video_info,
+      const char *msg,
+      const void *params, void *font)
 {
    ctr_video_t* ctr = (ctr_video_t*)data;
 
    if (ctr && ctr->msg_rendering_enabled)
-      font_driver_render_msg(font, msg, params);
+      font_driver_render_msg(video_info, font, msg, params);
 }
 
-
 static const video_poke_interface_t ctr_poke_interface = {
+   NULL, /* get_flags */
+   NULL,                                  /* set_coords */
+   NULL,                                  /* set_mvp    */
    ctr_load_texture,
    ctr_unload_texture,
    NULL,
+   NULL,
    ctr_set_filtering,
-   NULL, /* get_video_output_size */
-   NULL, /* get_video_output_prev */
-   NULL, /* get_video_output_next */
-   NULL, /* get_current_framebuffer */
+   NULL,                                  /* get_video_output_size */
+   NULL,                                  /* get_video_output_prev */
+   NULL,                                  /* get_video_output_next */
+   NULL,                                  /* get_current_framebuffer */
    NULL,
    ctr_set_aspect_ratio,
    ctr_apply_state_changes,
-#ifdef HAVE_MENU
    ctr_set_texture_frame,
    ctr_set_texture_enable,
    ctr_set_osd_msg,
-#endif
-   NULL,
-   NULL,
-   NULL
+   NULL,                   /* show_mouse */
+   NULL,                   /* grab_mouse_toggle */
+   NULL,                   /* get_current_shader */
+   NULL,                   /* get_current_software_framebuffer */
+   NULL                    /* get_hw_render_interface */
 };
 
 static void ctr_get_poke_interface(void* data,
@@ -1132,7 +1165,7 @@ static void ctr_get_poke_interface(void* data,
    *iface = &ctr_poke_interface;
 }
 
-static bool ctr_read_viewport(void* data, uint8_t* buffer)
+static bool ctr_read_viewport(void* data, uint8_t* buffer, bool is_idle)
 {
    (void)data;
    (void)buffer;
@@ -1157,7 +1190,7 @@ video_driver_t video_ctr =
    ctr_alive,
    ctr_focus,
    ctr_suppress_screensaver,
-   ctr_has_windowed,
+   NULL, /* has_windowed */
    ctr_set_shader,
    ctr_free,
    "ctr",

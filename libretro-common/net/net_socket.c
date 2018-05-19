@@ -1,4 +1,4 @@
-/* Copyright  (C) 2010-2016 The RetroArch team
+/* Copyright  (C) 2010-2018 The RetroArch team
  *
  * ---------------------------------------------------------------------------------------
  * The following license statement only applies to this file (net_socket.c).
@@ -30,7 +30,7 @@ int socket_init(void **address, uint16_t port, const char *server, enum socket_t
    struct addrinfo hints = {0};
    struct addrinfo **addrinfo = (struct addrinfo**)address;
    struct addrinfo *addr = NULL;
-   
+
    if (!network_init())
       goto error;
 
@@ -54,7 +54,7 @@ int socket_init(void **address, uint16_t port, const char *server, enum socket_t
 
    snprintf(port_buf, sizeof(port_buf), "%hu", (unsigned short)port);
 
-   if (getaddrinfo_retro(server, port_buf, &hints, addrinfo) < 0)
+   if (getaddrinfo_retro(server, port_buf, &hints, addrinfo) != 0)
       goto error;
 
    addr = (struct addrinfo*)*addrinfo;
@@ -68,6 +68,15 @@ error:
    return -1;
 }
 
+int socket_next(void **addrinfo)
+{
+   struct addrinfo *addr = (struct addrinfo*)*addrinfo;
+   if ((*addrinfo = addr = addr->ai_next))
+      return socket(addr->ai_family, addr->ai_socktype, addr->ai_protocol);
+   else
+      return -1;
+}
+
 ssize_t socket_receive_all_nonblocking(int fd, bool *error,
       void *data_, size_t size)
 {
@@ -78,9 +87,13 @@ ssize_t socket_receive_all_nonblocking(int fd, bool *error,
       return ret;
 
    if (ret == 0)
+   {
+      /* Socket closed */
+      *error = true;
       return -1;
+   }
 
-   if (isagain(ret))
+   if (isagain((int)ret))
       return 0;
 
    *error = true;
@@ -106,7 +119,7 @@ int socket_receive_all_blocking(int fd, void *data_, size_t size)
 
 bool socket_nonblock(int fd)
 {
-#if defined(__CELLOS_LV2__) || defined(VITA)
+#if defined(__CELLOS_LV2__) || defined(VITA) || defined(WIIU)
    int i = 1;
    setsockopt(fd, SOL_SOCKET, SO_NBIO, &i, sizeof(int));
    return true;
@@ -119,11 +132,11 @@ bool socket_nonblock(int fd)
 }
 
 int socket_close(int fd)
-{ 
+{
 #if defined(_WIN32) && !defined(_XBOX360)
    /* WinSock has headers from the stone age. */
    return closesocket(fd);
-#elif defined(__CELLOS_LV2__)
+#elif defined(__CELLOS_LV2__) || defined(WIIU)
    return socketclose(fd);
 #elif defined(VITA)
    return sceNetSocketClose(fd);
@@ -138,6 +151,7 @@ int socket_select(int nfds, fd_set *readfs, fd_set *writefds,
 #if defined(__CELLOS_LV2__)
    return socketselect(nfds, readfs, writefds, errorfds, timeout);
 #elif defined(VITA)
+   extern int retro_epoll_fd;
    SceNetEpollEvent ev = {0};
 
    ev.events = SCE_NET_EPOLLIN | SCE_NET_EPOLLHUP;
@@ -166,7 +180,7 @@ int socket_send_all_blocking(int fd, const void *data_, size_t size,
             no_signal ? MSG_NOSIGNAL : 0);
       if (ret <= 0)
       {
-         if (isagain(ret))
+         if (isagain((int)ret))
             continue;
 
          return false;
@@ -177,6 +191,34 @@ int socket_send_all_blocking(int fd, const void *data_, size_t size,
    }
 
    return true;
+}
+
+ssize_t socket_send_all_nonblocking(int fd, const void *data_, size_t size,
+      bool no_signal)
+{
+   const uint8_t *data = (const uint8_t*)data_;
+   ssize_t sent = 0;
+
+   while (size)
+   {
+      ssize_t ret = send(fd, (const char*)data, size,
+            no_signal ? MSG_NOSIGNAL : 0);
+      if (ret < 0)
+      {
+         if (isagain((int)ret))
+            break;
+
+         return -1;
+      }
+      else if (ret == 0)
+         break;
+
+      data += ret;
+      size -= ret;
+      sent += ret;
+   }
+
+   return sent;
 }
 
 bool socket_bind(int fd, void *data)
@@ -194,8 +236,7 @@ int socket_connect(int fd, void *data, bool timeout_enable)
 {
    struct addrinfo *addr = (struct addrinfo*)data;
 
-#ifndef _WIN32
-#ifndef VITA
+#if !defined(_WIN32) && !defined(VITA) && !defined(WIIU) && !defined(_3DS)
    if (timeout_enable)
    {
       struct timeval timeout;
@@ -204,7 +245,6 @@ int socket_connect(int fd, void *data, bool timeout_enable)
 
       setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, (char*)&timeout, sizeof timeout);
    }
-#endif
 #endif
 
    return connect(fd, addr->ai_addr, addr->ai_addrlen);

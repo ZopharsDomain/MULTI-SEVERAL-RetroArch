@@ -1,5 +1,5 @@
 /*  RetroArch - A frontend for libretro.
- *  Copyright (C) 2011-2016 - Daniel De Matteis
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -42,7 +42,7 @@ const char *msg_hash_to_str_eo(enum msg_hash_enums msg)
 {
    switch (msg)
    {
-      case 0:
+      #include "msg_hash_eo.h"
       default:
          break;
    }

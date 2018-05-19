@@ -1,6 +1,6 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
- *  Copyright (C) 2011-2016 - Daniel De Matteis
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
  *  Copyright (C) 2013-2014 - CatalystG
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
@@ -18,7 +18,8 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <boolean.h>
-#include "../input_joypad_driver.h"
+
+#include "../input_driver.h"
 
 static const char *null_joypad_name(unsigned pad)
 {
@@ -36,9 +37,9 @@ static bool null_joypad_button(unsigned port_num, uint16_t joykey)
    return false;
 }
 
-static uint64_t null_joypad_get_buttons(unsigned port_num)
+static void null_joypad_get_buttons(unsigned port_num, input_bits_t *state)
 {
-   return 0;
+	BIT256_CLEAR_ALL_PTR(state);
 }
 
 static int16_t null_joypad_axis(unsigned port_num, uint32_t joyaxis)

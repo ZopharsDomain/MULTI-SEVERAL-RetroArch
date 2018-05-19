@@ -1,6 +1,6 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
- *  Copyright (C) 2011-2014 - Daniel De Matteis
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -67,11 +67,10 @@ static void *epx_generic_create(const struct softfilter_config *config,
       unsigned max_width, unsigned max_height,
       unsigned threads, softfilter_simd_mask_t simd, void *userdata)
 {
+   struct filter_data *filt = (struct filter_data*)calloc(1, sizeof(*filt));
    (void)simd;
    (void)config;
    (void)userdata;
-
-   struct filter_data *filt = (struct filter_data*)calloc(1, sizeof(*filt));
    if (!filt)
       return NULL;
    filt->workers = (struct softfilter_thread_data*)
@@ -122,7 +121,7 @@ static void epx_generic_rgb565 (unsigned width, unsigned height,
       dP1 = (uint32_t *) dst;
       dP2 = (uint32_t *) (dst + dst_stride);
 
-      // left edge
+      /* left edge */
 
       colorX = *sP;
       colorC = *++sP;
@@ -144,8 +143,6 @@ static void epx_generic_rgb565 (unsigned width, unsigned height,
 
       dP1++;
       dP2++;
-
-      //
 
       for (w = width - 2; w; w--)
       {
@@ -172,7 +169,7 @@ static void epx_generic_rgb565 (unsigned width, unsigned height,
          dP2++;
       }
 
-      // right edge
+      /* right edge */
 
       colorA = colorX;
       colorX = colorC;
@@ -199,7 +196,7 @@ static void epx_generic_rgb565 (unsigned width, unsigned height,
 
 static void epx_work_cb_rgb565(void *data, void *thread_data)
 {
-   struct softfilter_thread_data *thr = 
+   struct softfilter_thread_data *thr =
       (struct softfilter_thread_data*)thread_data;
    uint16_t *input = (uint16_t*)thr->in_data;
    uint16_t *output = (uint16_t*)thr->out_data;
@@ -208,9 +205,9 @@ static void epx_work_cb_rgb565(void *data, void *thread_data)
 
    epx_generic_rgb565(width, height,
          thr->first, thr->last, input,
-         thr->in_pitch / SOFTFILTER_BPP_RGB565,
+         (unsigned)(thr->in_pitch / SOFTFILTER_BPP_RGB565),
          output,
-         thr->out_pitch / SOFTFILTER_BPP_RGB565);
+         (unsigned)(thr->out_pitch / SOFTFILTER_BPP_RGB565));
 }
 
 
@@ -224,7 +221,7 @@ static void epx_generic_packets(void *data,
 
    for (i = 0; i < filt->threads; i++)
    {
-      struct softfilter_thread_data *thr = 
+      struct softfilter_thread_data *thr =
          (struct softfilter_thread_data*)&filt->workers[i];
 
       unsigned y_start = (height * i) / filt->threads;
@@ -236,7 +233,7 @@ static void epx_generic_packets(void *data,
       thr->width = width;
       thr->height = y_end - y_start;
 
-      /* Workers need to know if they can 
+      /* Workers need to know if they can
        * access pixels outside their given buffer. */
       thr->first = y_start;
       thr->last = y_end == height;

@@ -1,7 +1,7 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
- *  Copyright (C) 2011-2016 - Daniel De Matteis
- * 
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
+ *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
  *  ation, either version 3 of the License, or (at your option) any later version.
@@ -22,7 +22,6 @@
 #include <rthreads/rthreads.h>
 
 #include "../audio_driver.h"
-#include "../../configuration.h"
 
 /* Helper macros, COM-style. */
 #define SLObjectItf_Realize(a, ...) ((*(a))->Realize(a, __VA_ARGS__))
@@ -98,7 +97,9 @@ static void sl_free(void *data)
    free(sl);
 }
 
-static void *sl_init(const char *device, unsigned rate, unsigned latency)
+static void *sl_init(const char *device, unsigned rate, unsigned latency,
+      unsigned block_frames,
+      unsigned *new_rate)
 {
    unsigned i;
    SLDataFormat_PCM fmt_pcm                        = {0};
@@ -106,7 +107,6 @@ static void *sl_init(const char *device, unsigned rate, unsigned latency)
    SLDataSink audio_sink                           = {0};
    SLDataLocator_AndroidSimpleBufferQueue loc_bufq = {0};
    SLDataLocator_OutputMix loc_outmix              = {0};
-   settings_t *settings                            = config_get_ptr();
    SLresult res                                    = 0;
    SLInterfaceID                                id = SL_IID_ANDROIDSIMPLEBUFFERQUEUE;
    SLboolean                                req    = SL_BOOLEAN_TRUE;
@@ -116,7 +116,7 @@ static void *sl_init(const char *device, unsigned rate, unsigned latency)
    if (!sl)
       goto error;
 
-   RARCH_LOG("[SLES]: Requested audio latency: %u ms.", latency);
+   RARCH_LOG("[OpenSL]: Requested audio latency: %u ms.", latency);
 
    GOTO_IF_FAIL(slCreateEngine(&sl->engine_object, 0, NULL, 0, NULL, NULL));
    GOTO_IF_FAIL(SLObjectItf_Realize(sl->engine_object, SL_BOOLEAN_FALSE));
@@ -125,13 +125,16 @@ static void *sl_init(const char *device, unsigned rate, unsigned latency)
    GOTO_IF_FAIL(SLEngineItf_CreateOutputMix(sl->engine, &sl->output_mix, 0, NULL, NULL));
    GOTO_IF_FAIL(SLObjectItf_Realize(sl->output_mix, SL_BOOLEAN_FALSE));
 
-   if (settings->audio.block_frames)
-      sl->buf_size  = settings->audio.block_frames * 4;
+   if (block_frames)
+      sl->buf_size  = block_frames * 4;
    else
       sl->buf_size  = next_pow2(32 * latency);
 
    sl->buf_count    = (latency * 4 * rate + 500) / 1000;
    sl->buf_count    = (sl->buf_count + sl->buf_size / 2) / sl->buf_size;
+
+   if (sl->buf_count < 2)
+      sl->buf_count = 2;
 
    sl->buffer       = (uint8_t**)calloc(sizeof(uint8_t*), sl->buf_count);
    if (!sl->buffer)
@@ -144,7 +147,7 @@ static void *sl_init(const char *device, unsigned rate, unsigned latency)
    for (i = 0; i < sl->buf_count; i++)
       sl->buffer[i] = sl->buffer_chunk + i * sl->buf_size;
 
-   RARCH_LOG("[SLES]: Setting audio latency: Block size = %u, Blocks = %u, Total = %u ...\n",
+   RARCH_LOG("[OpenSL]: Setting audio latency: Block size = %u, Blocks = %u, Total = %u ...\n",
          sl->buf_size, sl->buf_count, sl->buf_size * sl->buf_count);
 
    fmt_pcm.formatType     = SL_DATAFORMAT_PCM;
@@ -192,7 +195,7 @@ static void *sl_init(const char *device, unsigned rate, unsigned latency)
    return sl;
 
 error:
-   RARCH_ERR("Couldn't initialize OpenSL ES driver, error code: [%d].\n", (int)res);
+   RARCH_ERR("[OpenSL]: Couldn't initialize OpenSL ES driver, error code: [%d].\n", (int)res);
    sl_free(sl);
    return NULL;
 }
@@ -200,7 +203,7 @@ error:
 static bool sl_stop(void *data)
 {
    sl_t      *sl = (sl_t*)data;
-   sl->is_paused = (SLPlayItf_SetPlayState(sl->player, SL_PLAYSTATE_STOPPED) 
+   sl->is_paused = (SLPlayItf_SetPlayState(sl->player, SL_PLAYSTATE_STOPPED)
          == SL_RESULT_SUCCESS) ? true : false;
 
    return sl->is_paused ? true : false;
@@ -221,7 +224,7 @@ static void sl_set_nonblock_state(void *data, bool state)
       sl->nonblock = state;
 }
 
-static bool sl_start(void *data)
+static bool sl_start(void *data, bool is_shutdown)
 {
    sl_t      *sl = (sl_t*)data;
    sl->is_paused = (SLPlayItf_SetPlayState(sl->player, SL_PLAYSTATE_PLAYING)

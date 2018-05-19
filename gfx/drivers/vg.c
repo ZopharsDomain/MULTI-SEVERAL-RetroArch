@@ -1,5 +1,6 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
  *  Copyright (C) 2012-2015 - Michael Lelli
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
@@ -31,14 +32,15 @@
 #include "../../config.h"
 #endif
 
-#include "../video_context_driver.h"
-#include "../../retroarch.h"
-#include "../../runloop.h"
-#include "../../driver.h"
-#include "../../performance_counters.h"
+#ifdef HAVE_MENU
+#include "../../menu/menu_driver.h"
+#endif
+
 #include "../font_driver.h"
+
+#include "../../retroarch.h"
+#include "../../driver.h"
 #include "../../content.h"
-#include "../../runloop.h"
 #include "../../verbosity.h"
 #include "../../configuration.h"
 
@@ -83,7 +85,7 @@ static INLINE bool vg_query_extension(const char *ext)
 {
    const char *str = (const char*)vgGetString(VG_EXTENSIONS);
    bool ret = str && strstr(str, ext);
-   RARCH_LOG("Querying VG extension: %s => %s\n",
+   RARCH_LOG("[VG]: Querying VG extension: %s => %s\n",
          ext, ret ? "exists" : "doesn't exist");
 
    return ret;
@@ -102,7 +104,7 @@ static void *vg_init(const video_info_t *video,
    settings_t        *settings = config_get_ptr();
    vg_t                    *vg = (vg_t*)calloc(1, sizeof(vg_t));
    const gfx_ctx_driver_t *ctx = video_context_driver_init_first(
-         vg, settings->video.context_driver,
+         vg, settings->arrays.video_context_driver,
          GFX_CTX_OPENVG_API, 0, 0, false);
 
    if (!vg || !ctx)
@@ -117,7 +119,7 @@ static void *vg_init(const video_info_t *video,
    mode.width  = 0;
    mode.height = 0;
 
-   RARCH_LOG("Detecting screen resolution %ux%u.\n", temp_width, temp_height);
+   RARCH_LOG("[VG]: Detecting screen resolution %ux%u.\n", temp_width, temp_height);
 
    if (temp_width != 0 && temp_height != 0)
       video_driver_set_size(&temp_width, &temp_height);
@@ -125,7 +127,6 @@ static void *vg_init(const video_info_t *video,
    interval = video->vsync ? 1 : 0;
 
    video_context_driver_swap_interval(&interval);
-   video_context_driver_update_window_title();
 
    vg->mTexType    = video->rgb32 ? VG_sXRGB_8888 : VG_sRGB_565;
    vg->keep_aspect = video->force_aspect;
@@ -166,7 +167,7 @@ static void *vg_init(const video_info_t *video,
 
    if (temp_width != 0 && temp_height != 0)
    {
-      RARCH_LOG("Verified window resolution %ux%u.\n", temp_width, temp_height);
+      RARCH_LOG("[VG]: Verified window resolution %ux%u.\n", temp_width, temp_height);
       video_driver_set_size(&temp_width, &temp_height);
    }
 
@@ -192,9 +193,9 @@ static void *vg_init(const video_info_t *video,
 
    video_context_driver_input_driver(&inp);
 
-   if (     settings->video.font_enable
+   if (     video->font_enable
          && font_renderer_create_default((const void**)&vg->font_driver, &vg->mFontRenderer,
-            *settings->path.font ? settings->path.font : NULL, settings->video.font_size))
+            *settings->paths.path_font ? settings->paths.path_font : NULL, settings->floats.video_font_size))
    {
       vg->mFont            = vgCreateFont(0);
 
@@ -204,18 +205,18 @@ static void *vg_init(const video_info_t *video,
          VGfloat paintBg[4];
 
          vg->mFontsOn      = true;
-         vg->mFontHeight   = settings->video.font_size;
+         vg->mFontHeight   = settings->floats.video_font_size;
          vg->mPaintFg      = vgCreatePaint();
          vg->mPaintBg      = vgCreatePaint();
 
-         paintFg[0] = settings->video.msg_color_r;
-         paintFg[1] = settings->video.msg_color_g;
-         paintFg[2] = settings->video.msg_color_b;
+         paintFg[0] = settings->floats.video_msg_color_r;
+         paintFg[1] = settings->floats.video_msg_color_g;
+         paintFg[2] = settings->floats.video_msg_color_b;
          paintFg[3] = 1.0f;
 
-         paintBg[0] = settings->video.msg_color_r / 2.0f;
-         paintBg[1] = settings->video.msg_color_g / 2.0f;
-         paintBg[2] = settings->video.msg_color_b / 2.0f;
+         paintBg[0] = settings->floats.video_msg_color_r / 2.0f;
+         paintBg[1] = settings->floats.video_msg_color_g / 2.0f;
+         paintBg[2] = settings->floats.video_msg_color_b / 2.0f;
          paintBg[3] = 0.5f;
 
          vgSetParameteri(vg->mPaintFg, VG_PAINT_TYPE, VG_PAINT_TYPE_COLOR);
@@ -231,7 +232,8 @@ static void *vg_init(const video_info_t *video,
    {
       gfx_ctx_proc_address_t proc_address;
 
-      proc_address.sym = "vgCreateEGLImageTargetKHR";
+      proc_address.addr = NULL;
+      proc_address.sym  = "vgCreateEGLImageTargetKHR";
 
       video_context_driver_get_proc_address(&proc_address);
 
@@ -282,10 +284,10 @@ static void vg_free(void *data)
    free(vg);
 }
 
-static void vg_calculate_quad(vg_t *vg)
+static void vg_calculate_quad(vg_t *vg, video_frame_info_t *video_info)
 {
-   unsigned width, height;
-   video_driver_get_size(&width, &height);
+   unsigned width  = video_info->width;
+   unsigned height = video_info->height;
 
    /* set viewport for aspect ratio, taken from the OpenGL driver. */
    if (vg->keep_aspect)
@@ -378,17 +380,12 @@ static void vg_copy_frame(void *data, const void *frame,
 
 static bool vg_frame(void *data, const void *frame,
       unsigned frame_width, unsigned frame_height,
-      uint64_t frame_count, unsigned pitch, const char *msg)
+      uint64_t frame_count, unsigned pitch, const char *msg,
+      video_frame_info_t *video_info)
 {
-   unsigned width, height;
    vg_t                           *vg = (vg_t*)data;
-   static struct retro_perf_counter    vg_fr = {0};
-   static struct retro_perf_counter vg_image = {0};
-
-   performance_counter_init(&vg_fr, "vg_fr");
-   performance_counter_start(&vg_fr);
-
-   video_driver_get_size(&width, &height);
+   unsigned width                            = video_info->width;
+   unsigned height                           = video_info->height;
 
    if (     frame_width != vg->mRenderWidth
          || frame_height != vg->mRenderHeight
@@ -396,7 +393,7 @@ static bool vg_frame(void *data, const void *frame,
    {
       vg->mRenderWidth  = frame_width;
       vg->mRenderHeight = frame_height;
-      vg_calculate_quad(vg);
+      vg_calculate_quad(vg, video_info);
       matrix_3x3_quad_to_quad(
          vg->x1, vg->y1, vg->x2, vg->y1, vg->x2, vg->y2, vg->x1, vg->y2,
          /* needs to be flipped, Khronos loves their bottom-left origin */
@@ -412,10 +409,11 @@ static bool vg_frame(void *data, const void *frame,
    vgClear(0, 0, width, height);
    vgSeti(VG_SCISSORING, VG_TRUE);
 
-   performance_counter_init(&vg_image, "vg_image");
-   performance_counter_start(&vg_image);
    vg_copy_frame(vg, frame, frame_width, frame_height, pitch);
-   performance_counter_stop(&vg_image);
+
+#ifdef HAVE_MENU
+   menu_driver_frame(video_info);
+#endif
 
    vgDrawImage(vg->mImage);
 
@@ -424,11 +422,10 @@ static bool vg_frame(void *data, const void *frame,
       vg_draw_message(vg, msg);
 #endif
 
-   video_context_driver_update_window_title();
-
-   performance_counter_stop(&vg_fr);
-
-   video_context_driver_swap_buffers();
+   video_info->cb_update_window_title(
+         video_info->context_data, video_info);
+   video_info->cb_swap_buffers(
+         video_info->context_data, video_info);
 
    return true;
 }
@@ -454,20 +451,10 @@ static bool vg_alive(void *data)
    return !quit;
 }
 
-static bool vg_focus(void *data)
-{
-   return video_context_driver_focus();
-}
-
 static bool vg_suppress_screensaver(void *data, bool enable)
 {
    bool enabled = enable;
    return video_context_driver_suppress_screensaver(&enabled);
-}
-
-static bool vg_has_windowed(void *data)
-{
-   return video_context_driver_has_windowed();
 }
 
 static bool vg_set_shader(void *data,
@@ -493,7 +480,7 @@ static void vg_viewport_info(void *data,
    (void)vp;
 }
 
-static bool vg_read_viewport(void *data, uint8_t *buffer)
+static bool vg_read_viewport(void *data, uint8_t *buffer, bool is_idle)
 {
    (void)data;
    (void)buffer;
@@ -513,19 +500,19 @@ video_driver_t video_vg = {
    vg_frame,
    vg_set_nonblock_state,
    vg_alive,
-   vg_focus,
+   NULL,                      /* focused */
    vg_suppress_screensaver,
-   vg_has_windowed,
+   NULL,                      /* has_windowed */
    vg_set_shader,
    vg_free,
    "vg",
-   NULL, /* set_viewport */
+   NULL,                      /* set_viewport */
    vg_set_rotation,
    vg_viewport_info,
    vg_read_viewport,
-   NULL, /* read_frame_raw */
+   NULL,                      /* read_frame_raw */
 #ifdef HAVE_OVERLAY
-  NULL, /* overlay_interface */
+  NULL,                       /* overlay_interface */
 #endif
   vg_get_poke_interface
 };

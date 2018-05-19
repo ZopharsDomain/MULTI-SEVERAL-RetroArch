@@ -1,4 +1,4 @@
-/* Copyright  (C) 2010-2016 The RetroArch team
+/* Copyright  (C) 2010-2017 The RetroArch team
  *
  * ---------------------------------------------------------------------------------------
  * The following license statement only applies to this file (rmsgpack_dom.c).
@@ -114,7 +114,7 @@ static int dom_read_bin(void *value, uint32_t len, void *data)
    struct dom_reader_state *dom_state = (struct dom_reader_state *)data;
    struct rmsgpack_dom_value *v =
       (struct rmsgpack_dom_value*)dom_reader_state_pop(dom_state);
-   
+
    v->type = RDT_BINARY;
    v->val.binary.len = len;
    v->val.binary.buff = (char *)value;
@@ -315,18 +315,10 @@ void rmsgpack_dom_value_print(struct rmsgpack_dom_value *obj)
             printf("false");
          break;
       case RDT_INT:
-#ifdef _WIN32
-         printf("%I64d", (signed long long)obj->val.int_);
-#else
-         printf("%lld", (signed long long)obj->val.int_);
-#endif
+         printf("%" PRId64, (int64_t)obj->val.int_);
          break;
       case RDT_UINT:
-#ifdef _WIN32
-         printf("%I64u", (unsigned long long)obj->val.uint_);
-#else
-         printf("%llu",  (unsigned long long)obj->val.uint_);
-#endif
+         printf("%" PRIu64, (uint64_t)obj->val.uint_);
          break;
       case RDT_STRING:
          printf("\"%s\"", obj->val.string.buff);
@@ -463,8 +455,8 @@ int rmsgpack_dom_read_into(RFILE *fd, ...)
       if (!key_name)
          goto clean;
 
-      key.type        = RDT_STRING;
-      key.val.string.len  = strlen(key_name);
+      key.type            = RDT_STRING;
+      key.val.string.len  = (uint32_t)strlen(key_name);
       key.val.string.buff = (char *) key_name;
 
       value = rmsgpack_dom_value_map_value(&map, &key);
@@ -495,7 +487,7 @@ int rmsgpack_dom_read_into(RFILE *fd, ...)
          case RDT_STRING:
             buff_value = va_arg(ap, char *);
             uint_value = va_arg(ap, uint64_t *);
-            min_len    = (value->val.string.len + 1 > *uint_value) ? 
+            min_len    = (value->val.string.len + 1 > *uint_value) ?
                *uint_value : value->val.string.len + 1;
             *uint_value = min_len;
 

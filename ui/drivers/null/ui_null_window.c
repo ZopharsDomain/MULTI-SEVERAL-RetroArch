@@ -1,5 +1,5 @@
 /* RetroArch - A frontend for libretro.
- *  Copyright (C) 2011-2016 - Daniel De Matteis
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
  *
  * RetroArch is free software: you can redistribute it and/or modify it under the terms
  * of the GNU General Public License as published by the Free Software Found-
@@ -20,6 +20,11 @@
 #include <string.h>
 
 #include "../../ui_companion_driver.h"
+
+static void* ui_window_null_init(void)
+{
+   return NULL;
+}
 
 static void ui_window_null_destroy(void *data)
 {
@@ -47,7 +52,8 @@ static bool ui_window_null_focused(void *data)
    return true;
 }
 
-const ui_window_t ui_window_null = {
+ui_window_t ui_window_null = {
+   ui_window_null_init,
    ui_window_null_destroy,
    ui_window_null_set_focused,
    ui_window_null_set_visible,

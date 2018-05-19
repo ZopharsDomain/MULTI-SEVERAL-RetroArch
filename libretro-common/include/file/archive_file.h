@@ -1,4 +1,4 @@
-/* Copyright  (C) 2010-2016 The RetroArch team
+/* Copyright  (C) 2010-2018 The RetroArch team
  *
  * ---------------------------------------------------------------------------------------
  * The following license statement only applies to this file (archive_file.h).
@@ -35,6 +35,10 @@
 
 #include <retro_miscellaneous.h>
 
+#include <retro_common_api.h>
+
+RETRO_BEGIN_DECLS
+
 enum file_archive_transfer_type
 {
    ARCHIVE_TRANSFER_NONE = 0,
@@ -56,13 +60,13 @@ typedef struct file_archive_file_data file_archive_file_data_t;
 
 typedef struct file_archive_transfer
 {
+   enum file_archive_transfer_type type;
+   int32_t archive_size;
    file_archive_file_data_t *handle;
    void *stream;
    const uint8_t *footer;
    const uint8_t *directory;
    const uint8_t *data;
-   int32_t archive_size;
-   enum file_archive_transfer_type type;
    const struct file_archive_file_backend *backend;
 } file_archive_transfer_t;
 
@@ -121,19 +125,9 @@ struct file_archive_file_backend
 {
    void *(*stream_new)(void);
    void  (*stream_free)(void *);
-   void  (*stream_set)(void *, uint32_t, uint32_t,
-         const uint8_t *, uint8_t *);
-   uint32_t (*stream_get_avail_in)(void*);
-   uint32_t (*stream_get_avail_out)(void*);
-   uint64_t (*stream_get_total_out)(void*);
-   void     (*stream_decrement_total_out)(void *, unsigned);
-   bool     (*stream_decompress_init)(void *);
    bool     (*stream_decompress_data_to_file_init)(
          file_archive_file_handle_t *, const uint8_t *,  uint32_t, uint32_t);
    int      (*stream_decompress_data_to_file_iterate)(void *);
-   void     (*stream_compress_init)(void *, int);
-   void     (*stream_compress_free)(void *);
-   int      (*stream_compress_data_to_file)(void *);
    uint32_t (*stream_crc_calculate)(uint32_t, const uint8_t *, size_t);
    int (*compressed_file_read)(const char *path, const char *needle, void **buf,
          const char *optional_outfile);
@@ -193,7 +187,7 @@ bool file_archive_perform_mode(const char *name, const char *valid_exts,
 
 int file_archive_compressed_read(
       const char* path, void **buf,
-      const char* optional_filename, ssize_t *length);
+      const char* optional_filename, int64_t *length);
 
 const struct file_archive_file_backend* file_archive_get_zlib_file_backend(void);
 const struct file_archive_file_backend* file_archive_get_7z_file_backend(void);
@@ -212,6 +206,8 @@ uint32_t file_archive_get_file_crc32(const char *path);
 
 extern const struct file_archive_file_backend zlib_backend;
 extern const struct file_archive_file_backend sevenzip_backend;
+
+RETRO_END_DECLS
 
 #endif
 

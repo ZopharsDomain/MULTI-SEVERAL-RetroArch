@@ -1,6 +1,6 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
- *  Copyright (C) 2011-2016 - Daniel De Matteis
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -14,12 +14,9 @@
  *  If not, see <http://www.gnu.org/licenses/>.
  */
 
-
-
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-
 
 #include <retro_assert.h>
 #include <compat/msvc.h>
@@ -28,9 +25,11 @@
 #include <queues/fifo_queue.h>
 #include <rthreads/rthreads.h>
 #include <gfx/scaler/scaler.h>
+#include <gfx/video_frame.h>
 #include <file/config_file.h>
-#include <conversion/float_to_s16.h>
-#include <conversion/s16_to_float.h>
+#include <audio/audio_resampler.h>
+#include <audio/conversion/float_to_s16.h>
+#include <audio/conversion/s16_to_float.h>
 
 #ifdef HAVE_CONFIG_H
 #include "../../config.h"
@@ -63,15 +62,23 @@ extern "C" {
 }
 #endif
 
-
 #include "../record_driver.h"
 
 #include "../../configuration.h"
 #include "../../gfx/video_driver.h"
-#include "../../audio/audio_resampler_driver.h"
 #include "../../verbosity.h"
 
-#include "../../gfx/video_frame.h"
+#ifndef AV_CODEC_FLAG_QSCALE
+#define AV_CODEC_FLAG_QSCALE CODEC_FLAG_QSCALE
+#endif
+
+#ifndef AV_CODEC_FLAG_GLOBAL_HEADER
+#define AV_CODEC_FLAG_GLOBAL_HEADER CODEC_FLAG_GLOBAL_HEADER
+#endif
+
+#ifndef AV_INPUT_BUFFER_MIN_SIZE
+#define AV_INPUT_BUFFER_MIN_SIZE FF_MIN_BUFFER_SIZE
+#endif
 
 #ifndef PIX_FMT_RGB32
 #define PIX_FMT_RGB32 AV_PIX_FMT_RGB32
@@ -145,7 +152,7 @@ struct ff_audio_info
     * Could use libswresample, but it doesn't support floating point ratios.
     * Use either S16 or (planar) float for simplicity.
     */
-   const rarch_resampler_t *resampler;
+   const retro_resampler_t *resampler;
    void *resampler_data;
 
    bool use_float;
@@ -184,7 +191,7 @@ struct ff_config_param
    unsigned threads;
    unsigned frame_drop_ratio;
    unsigned sample_rate;
-   unsigned scale_factor;
+   float scale_factor;
 
    bool audio_enable;
    /* Keep same naming conventions as libavcodec. */
@@ -205,7 +212,7 @@ typedef struct ffmpeg
    struct ff_audio_info audio;
    struct ff_muxer_info muxer;
    struct ff_config_param config;
-   
+
    struct ffemu_params params;
 
    scond_t *cond;
@@ -338,9 +345,10 @@ static bool ffmpeg_init_audio(ffmpeg_t *handle)
       audio->codec->sample_rate = params->sample_rate;
       audio->codec->time_base = av_d2q(1.0 / params->sample_rate, 1000000);
 
-      rarch_resampler_realloc(&audio->resampler_data,
+      retro_resampler_realloc(&audio->resampler_data,
             &audio->resampler,
-            settings->audio.resampler,
+            settings->arrays.audio_resampler,
+            RESAMPLER_QUALITY_DONTCARE,
             audio->ratio);
    }
    else
@@ -352,7 +360,7 @@ static bool ffmpeg_init_audio(ffmpeg_t *handle)
 
    if (params->audio_qscale)
    {
-      audio->codec->flags |= CODEC_FLAG_QSCALE;
+      audio->codec->flags |= AV_CODEC_FLAG_QSCALE;
       audio->codec->global_quality = params->audio_global_quality;
    }
    else if (params->audio_bit_rate)
@@ -362,7 +370,7 @@ static bool ffmpeg_init_audio(ffmpeg_t *handle)
    audio->codec->strict_std_compliance = FF_COMPLIANCE_EXPERIMENTAL;
 
    if (handle->muxer.ctx->oformat->flags & AVFMT_GLOBALHEADER)
-      audio->codec->flags |= CODEC_FLAG_GLOBAL_HEADER;
+      audio->codec->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
 
    if (avcodec_open2(audio->codec, codec, params->audio_opts ? &params->audio_opts : NULL) != 0)
       return false;
@@ -382,7 +390,7 @@ static bool ffmpeg_init_audio(ffmpeg_t *handle)
    if (!audio->buffer)
       return false;
 
-   audio->outbuf_size = FF_MIN_BUFFER_SIZE;
+   audio->outbuf_size = AV_INPUT_BUFFER_MIN_SIZE;
    audio->outbuf = (uint8_t*)av_malloc(audio->outbuf_size);
    if (!audio->outbuf)
       return false;
@@ -478,8 +486,8 @@ static bool ffmpeg_init_video(ffmpeg_t *handle)
    /* Useful to set scale_factor to 2 for chroma subsampled formats to
     * maintain full chroma resolution. (Or just use 4:4:4 or RGB ...)
     */
-   param->out_width  *= params->scale_factor;
-   param->out_height *= params->scale_factor;
+   param->out_width  = (float)param->out_width  * params->scale_factor;
+   param->out_height = (float)param->out_height * params->scale_factor;
 
    video->codec->codec_type          = AVMEDIA_TYPE_VIDEO;
    video->codec->width               = param->out_width;
@@ -494,14 +502,14 @@ static bool ffmpeg_init_video(ffmpeg_t *handle)
 
    if (params->video_qscale)
    {
-      video->codec->flags |= CODEC_FLAG_QSCALE;
+      video->codec->flags |= AV_CODEC_FLAG_QSCALE;
       video->codec->global_quality = params->video_global_quality;
    }
    else if (params->video_bit_rate)
       video->codec->bit_rate = params->video_bit_rate;
 
    if (handle->muxer.ctx->oformat->flags & AVFMT_GLOBALHEADER)
-      video->codec->flags |= CODEC_FLAG_GLOBAL_HEADER;
+      video->codec->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
 
    if (avcodec_open2(video->codec, codec, params->video_opts ?
             &params->video_opts : NULL) != 0)
@@ -568,7 +576,7 @@ static bool ffmpeg_init_config(struct ff_config_param *params,
       params->audio_enable = true;
 
    config_get_uint(params->conf, "sample_rate", &params->sample_rate);
-   config_get_uint(params->conf, "scale_factor", &params->scale_factor);
+   config_get_float(params->conf, "scale_factor", &params->scale_factor);
 
    params->audio_qscale = config_get_int(params->conf, "audio_global_quality",
          &params->audio_global_quality);
@@ -639,7 +647,7 @@ static bool ffmpeg_init_muxer_post(ffmpeg_t *handle)
    stream->codec = handle->video.codec;
    stream->time_base = stream->codec->time_base;
    handle->muxer.vstream = stream;
-   handle->muxer.vstream->sample_aspect_ratio = 
+   handle->muxer.vstream->sample_aspect_ratio =
       handle->video.codec->sample_aspect_ratio;
 
    if (handle->config.audio_enable)
@@ -652,7 +660,7 @@ static bool ffmpeg_init_muxer_post(ffmpeg_t *handle)
    }
 
    av_dict_set(&handle->muxer.ctx->metadata, "title",
-         "RetroArch video dump", 0); 
+         "RetroArch video dump", 0);
 
    return avformat_write_header(handle->muxer.ctx, NULL) >= 0;
 }
@@ -710,7 +718,7 @@ static void deinit_thread_buf(ffmpeg_t *handle)
       fifo_free(handle->audio_fifo);
       handle->audio_fifo = NULL;
    }
-   
+
    if (handle->attr_fifo)
    {
       fifo_free(handle->attr_fifo);
@@ -1054,7 +1062,7 @@ static void planarize_audio(ffmpeg_t *handle)
 
    if (handle->audio.frames_in_buffer > handle->audio.planar_buf_frames)
    {
-      handle->audio.planar_buf = av_realloc(handle->audio.planar_buf, 
+      handle->audio.planar_buf = av_realloc(handle->audio.planar_buf,
             handle->audio.frames_in_buffer * handle->params.channels *
             handle->audio.sample_size);
       if (!handle->audio.planar_buf)
@@ -1215,16 +1223,16 @@ static bool ffmpeg_push_audio_thread(ffmpeg_t *handle,
    while (written_frames < aud->frames)
    {
       AVPacket pkt;
-      size_t can_write    = handle->audio.codec->frame_size - 
+      size_t can_write    = handle->audio.codec->frame_size -
          handle->audio.frames_in_buffer;
       size_t write_left   = aud->frames - written_frames;
       size_t write_frames = write_left > can_write ? can_write : write_left;
-      size_t write_size   = write_frames * 
+      size_t write_size   = write_frames *
          handle->params.channels * handle->audio.sample_size;
 
-      size_t bytes_in_buffer = handle->audio.frames_in_buffer * 
+      size_t bytes_in_buffer = handle->audio.frames_in_buffer *
          handle->params.channels * handle->audio.sample_size;
-      size_t written_bytes   = written_frames * 
+      size_t written_bytes   = written_frames *
          handle->params.channels * handle->audio.sample_size;
 
       memcpy(handle->audio.buffer + bytes_in_buffer,
@@ -1234,7 +1242,7 @@ static bool ffmpeg_push_audio_thread(ffmpeg_t *handle,
       written_frames                 += write_frames;
       handle->audio.frames_in_buffer += write_frames;
 
-      if ((handle->audio.frames_in_buffer 
+      if ((handle->audio.frames_in_buffer
                < (size_t)handle->audio.codec->frame_size) && require_block)
          break;
 
@@ -1294,16 +1302,16 @@ static void ffmpeg_flush_video(ffmpeg_t *handle)
 static void ffmpeg_flush_buffers(ffmpeg_t *handle)
 {
    bool did_work;
-   void *video_buf = av_malloc(2 * handle->params.fb_width * 
+   void *video_buf = av_malloc(2 * handle->params.fb_width *
          handle->params.fb_height * handle->video.pix_size);
-   size_t audio_buf_size = handle->config.audio_enable ? 
-      (handle->audio.codec->frame_size * 
+   size_t audio_buf_size = handle->config.audio_enable ?
+      (handle->audio.codec->frame_size *
        handle->params.channels * sizeof(int16_t)) : 0;
    void *audio_buf = NULL;
 
    if (audio_buf_size)
       audio_buf = av_malloc(audio_buf_size);
-   /* Try pushing data in an interleaving pattern to 
+   /* Try pushing data in an interleaving pattern to
     * ease the work of the muxer a bit. */
 
    do
@@ -1331,7 +1339,7 @@ static void ffmpeg_flush_buffers(ffmpeg_t *handle)
       if (fifo_read_avail(handle->attr_fifo) >= sizeof(attr_buf))
       {
          fifo_read(handle->attr_fifo, &attr_buf, sizeof(attr_buf));
-         fifo_read(handle->video_fifo, video_buf, 
+         fifo_read(handle->video_fifo, video_buf,
                attr_buf.height * attr_buf.pitch);
          attr_buf.data = video_buf;
          ffmpeg_push_video_thread(handle, &attr_buf);
@@ -1376,14 +1384,14 @@ static void ffmpeg_thread(void *data)
    size_t audio_buf_size;
    void *audio_buf = NULL;
    ffmpeg_t *ff    = (ffmpeg_t*)data;
-   /* For some reason, FFmpeg has a tendency to crash 
+   /* For some reason, FFmpeg has a tendency to crash
     * if we don't overallocate a bit. */
    void *video_buf = av_malloc(2 * ff->params.fb_width *
          ff->params.fb_height * ff->video.pix_size);
 
    retro_assert(video_buf);
 
-   audio_buf_size = ff->config.audio_enable ? 
+   audio_buf_size = ff->config.audio_enable ?
       (ff->audio.codec->frame_size * ff->params.channels * sizeof(int16_t)) : 0;
    audio_buf      = audio_buf_size ? av_malloc(audio_buf_size) : NULL;
 

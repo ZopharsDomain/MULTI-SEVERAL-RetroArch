@@ -1,7 +1,7 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
- *  Copyright (C) 2011-2016 - Daniel De Matteis
- * 
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
+ *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
  *  ation, either version 3 of the License, or (at your option) any later version.
@@ -26,9 +26,9 @@
 #include "../../config.h"
 #endif
 
-#include "../../configuration.h"
+#include "../font_driver.h"
+
 #include "../../driver.h"
-#include "../../runloop.h"
 
 #define XE_W 512
 #define XE_H 512
@@ -138,7 +138,7 @@ static void *xenon360_gfx_init(const video_info_t *video, const input_driver_t *
    edram_init(gl->gl_device);
 
 
-   // enable filtering for now
+   /* enable filtering for now */
 
    float x = -1.0f;
    float y = 1.0f;
@@ -151,21 +151,21 @@ static void *xenon360_gfx_init(const video_info_t *video, const input_driver_t *
    ScreenUv[UV_TOP] = ScreenUv[UV_TOP] * 2;
    ScreenUv[UV_LEFT] = ScreenUv[UV_LEFT] * 2;
 
-   // top left
+   /* top left */
    Rect[0].x = x;
    Rect[0].y = y;
    Rect[0].u = ScreenUv[UV_BOTTOM];
    Rect[0].v = ScreenUv[UV_RIGHT];
    Rect[0].color = 0;
 
-   // bottom left
+   /* bottom left */
    Rect[1].x = x;
    Rect[1].y = y - h;
    Rect[1].u = ScreenUv[UV_BOTTOM];
    Rect[1].v = ScreenUv[UV_LEFT];
    Rect[1].color = 0;
 
-   // top right
+   /* top right */
    Rect[2].x = x + w;
    Rect[2].y = y;
    Rect[2].u = ScreenUv[UV_TOP];
@@ -193,7 +193,7 @@ static void *xenon360_gfx_init(const video_info_t *video, const input_driver_t *
 }
 
 static bool xenon360_gfx_frame(void *data, const void *frame, unsigned width, unsigned height,
-      uint64_t frame_count, unsigned pitch, const char *msg)
+      uint64_t frame_count, unsigned pitch, const char *msg, video_frame_info_t *video_info)
 {
    gl_t *vid = data;
 
@@ -202,39 +202,44 @@ static bool xenon360_gfx_frame(void *data, const void *frame, unsigned width, un
 
    DrawVerticeFormats * Rect = Xe_VB_Lock(vid->gl_device, vid->vb, 0, 3 * sizeof(DrawVerticeFormats), XE_LOCK_WRITE);
 
-   // bottom left
+   /* bottom left */
    Rect[1].v = ScreenUv[UV_LEFT];
    Rect[2].u = ScreenUv[UV_TOP];
 
    Xe_VB_Unlock(vid->gl_device, vid->vb);
 
-   // Refresh texture cache
-   uint16_t *dst = Xe_Surface_LockRect(vid->gl_device, vid->g_pTexture, 0, 0, 0, 0, XE_LOCK_WRITE);
+   /* Refresh texture cache */
+   uint16_t *dst       = Xe_Surface_LockRect(vid->gl_device, vid->g_pTexture, 0, 0, 0, 0, XE_LOCK_WRITE);
    const uint16_t *src = frame;
-   unsigned stride_in = pitch >>1;
+   unsigned stride_in  = pitch >>1;
    unsigned stride_out = vid->g_pTexture->wpitch >> 1;
-   unsigned copy_size =width << 1;
+   unsigned copy_size  = width << 1;
+
    for (unsigned y = 0; y < height; y++, dst += stride_out, src += stride_in)
       memcpy(dst, src, copy_size);
    Xe_Surface_Unlock(vid->gl_device, vid->g_pTexture);
 
-   // Reset states
+   /* Reset states */
    Xe_InvalidateState(vid->gl_device);
    Xe_SetClearColor(vid->gl_device, 0);
 
-   // Select stream
+   /* Select stream */
    Xe_SetTexture(vid->gl_device, 0, vid->g_pTexture);
    Xe_SetCullMode(vid->gl_device, XE_CULL_NONE);
    Xe_SetStreamSource(vid->gl_device, 0, vid->vb, 0, sizeof(DrawVerticeFormats));
 
-   // Select shaders
+   /* Select shaders */
    Xe_SetShader(vid->gl_device, SHADER_TYPE_PIXEL, vid->g_pPixelTexturedShader, 0);
    Xe_SetShader(vid->gl_device, SHADER_TYPE_VERTEX, vid->g_pVertexShader, 0);
 
-   // Draw
+#ifdef HAVE_MENU
+   menu_driver_frame(video_info);
+#endif
+
+   /* Draw */
    Xe_DrawPrimitive(vid->gl_device, XE_PRIMTYPE_TRIANGLELIST, 0, 1);
 
-   // Resolve
+   /* Resolve */
    Xe_Resolve(vid->gl_device);
    Xe_Sync(vid->gl_device);
 
@@ -266,12 +271,6 @@ static bool xenon360_gfx_suppress_screensaver(void *data, bool enable)
    return false;
 }
 
-static bool xenon360_gfx_has_windowed(void *data)
-{
-   (void)data;
-   return false;
-}
-
 static void xenon360_gfx_set_rotation(void *data, unsigned rotation)
 {
    (void)data;
@@ -285,7 +284,7 @@ static bool xenon360_gfx_set_shader(void *data,
    (void)type;
    (void)path;
 
-   return false; 
+   return false;
 }
 
 static void xenon360_gfx_viewport_info(void *data, struct video_viewport *vp)
@@ -294,7 +293,7 @@ static void xenon360_gfx_viewport_info(void *data, struct video_viewport *vp)
    (void)vp;
 }
 
-static bool xenon360_gfx_read_viewport(void *data, uint8_t *buffer)
+static bool xenon360_gfx_read_viewport(void *data, uint8_t *buffer, bool is_idle)
 {
    (void)data;
    (void)buffer;
@@ -316,7 +315,7 @@ video_driver_t video_xenon360 = {
    xenon360_gfx_alive,
    xenon360_gfx_focus,
    xenon360_gfx_suppress_screensaver,
-   xenon360_gfx_has_windowed,
+   NULL, /* has_windowed */
    xenon360_gfx_set_shader,
    xenon360_gfx_free,
    "xenon360",

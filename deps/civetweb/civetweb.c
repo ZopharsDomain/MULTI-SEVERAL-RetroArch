@@ -132,6 +132,8 @@ mg_static_assert(sizeof(void *) >= sizeof(int), "data type size check");
 #include <mach/mach_time.h>
 #include <assert.h>
 
+#include <compat/strl.h>
+#include <net/net_compat.h>
 
 /* clock_gettime is not implemented on OSX */
 int clock_gettime(int clk_id, struct timespec *t);
@@ -5654,8 +5656,8 @@ mg_modify_passwords_file(const char *fname,
   }
 
   /* Create a temporary file name. Length has been checked before. */
-  strcpy(tmp, fname);
-  strcat(tmp, ".tmp");
+  strlcpy(tmp, fname,  sizeof(tmp));
+  strlcat(tmp, ".tmp", sizeof(tmp));
 
   /* Create the file if does not exist */
   /* Use of fopen here is OK, since fname is only ASCII */
@@ -5726,7 +5728,7 @@ mg_inet_pton(int af, const char *src, void *dst, size_t dstlen)
   memset(&hints, 0, sizeof(struct addrinfo));
   hints.ai_family = af;
 
-  if (getaddrinfo(src, NULL, &hints, &res) != 0) {
+  if (getaddrinfo_retro(src, NULL, &hints, &res) != 0) {
     /* bad src string or bad address family */
     return 0;
   }

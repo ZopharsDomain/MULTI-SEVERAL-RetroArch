@@ -1,4 +1,4 @@
-/* Copyright  (C) 2010-2016 The RetroArch team
+/* Copyright  (C) 2010-2018 The RetroArch team
  *
  * ---------------------------------------------------------------------------------------
  * The following license statement only applies to this file (image_texture.c).
@@ -38,28 +38,18 @@ enum video_image_format
    IMAGE_FORMAT_BMP
 };
 
-static bool image_texture_supports_rgba = false;
-
-void image_texture_set_rgba(void)
-{
-   image_texture_supports_rgba = true;
-}
-
-void image_texture_unset_rgba(void)
-{
-   image_texture_supports_rgba = false;
-}
-
 bool image_texture_set_color_shifts(
       unsigned *r_shift, unsigned *g_shift, unsigned *b_shift,
-      unsigned *a_shift)
+      unsigned *a_shift,
+      struct texture_image *out_img
+      )
 {
    *a_shift             = 24;
    *r_shift             = 16;
    *g_shift             = 8;
    *b_shift             = 0;
 
-   if (image_texture_supports_rgba)
+   if (out_img->supports_rgba)
    {
       *r_shift = 0;
       *b_shift = 16;
@@ -124,17 +114,17 @@ static bool image_texture_internal_gx_convert_texture32(
    unsigned tmp_pitch, width2, i;
    const uint16_t *src = NULL;
    uint16_t *dst       = NULL;
-   /* Memory allocation in libogc is extremely primitive so try 
-    * to avoid gaps in memory when converting by copying over to 
-    * a temporary buffer first, then converting over into 
+   /* Memory allocation in libogc is extremely primitive so try
+    * to avoid gaps in memory when converting by copying over to
+    * a temporary buffer first, then converting over into
     * main buffer again. */
-   void *tmp           = malloc(image->width 
+   void *tmp           = malloc(image->width
          * image->height * sizeof(uint32_t));
 
    if (!tmp)
       return false;
 
-   memcpy(tmp, image->pixels, image->width 
+   memcpy(tmp, image->pixels, image->width
          * image->height * sizeof(uint32_t));
    tmp_pitch = (image->width * sizeof(uint32_t)) >> 1;
 
@@ -274,7 +264,7 @@ static enum image_type_enum image_texture_convert_fmt_to_type(enum video_image_f
    return IMAGE_TYPE_NONE;
 }
 
-bool image_texture_load(struct texture_image *out_img, 
+bool image_texture_load(struct texture_image *out_img,
       const char *path)
 {
    unsigned r_shift, g_shift, b_shift, a_shift;
@@ -284,7 +274,7 @@ bool image_texture_load(struct texture_image *out_img,
    enum video_image_format fmt = image_texture_get_type(path);
 
    image_texture_set_color_shifts(&r_shift, &g_shift, &b_shift,
-         &a_shift);
+         &a_shift, out_img);
 
    if (fmt != IMAGE_FORMAT_NONE)
    {
@@ -308,9 +298,10 @@ bool image_texture_load(struct texture_image *out_img,
    }
 
 error:
-   out_img->pixels = NULL;
-   out_img->width  = 0;
-   out_img->height = 0;
+   out_img->supports_rgba = false;
+   out_img->pixels        = NULL;
+   out_img->width         = 0;
+   out_img->height        = 0;
    if (handle)
       nbio_free(handle);
 

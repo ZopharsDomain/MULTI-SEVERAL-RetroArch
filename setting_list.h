@@ -1,6 +1,6 @@
 /*  RetroArch - A frontend for libretro.
- *  Copyright (C) 2011-2016 - Daniel De Matteis
- * 
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
+ *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
  *  ation, either version 3 of the License, or (at your option) any later version.
@@ -57,7 +57,8 @@ enum setting_flags
    SD_FLAG_EXIT           = (1 << 6),
    SD_FLAG_CMD_APPLY_AUTO = (1 << 7),
    SD_FLAG_BROWSER_ACTION = (1 << 8),
-   SD_FLAG_ADVANCED       = (1 << 9)
+   SD_FLAG_ADVANCED       = (1 << 9),
+   SD_FLAG_LAKKA_ADVANCED = (1 << 10)
 };
 
 enum settings_free_flags
@@ -89,31 +90,37 @@ struct rarch_setting_group_info
 
 struct rarch_setting
 {
-   enum msg_hash_enums enum_idx;
-   enum msg_hash_enums enum_value_idx;
+   enum setting_type    browser_selection_type;
+   enum msg_hash_enums  enum_idx;
+   enum msg_hash_enums  enum_value_idx;
    enum setting_type    type;
 
-   bool dont_use_enum_idx_representation;
+   bool                 dont_use_enum_idx_representation;
+   bool                 enforce_minrange;
+   bool                 enforce_maxrange;
 
+   uint8_t              index;
+   uint8_t              index_offset;
+
+   unsigned             bind_type;
    uint32_t             size;
-   
+
+   float                step;
+
+   uint64_t             flags;
+   uint64_t             free_flags;
+
+   double               min;
+   double               max;
+
+   const char           *rounding_fraction;
    const char           *name;
-   uint32_t             name_hash;
    const char           *short_description;
    const char           *group;
    const char           *subgroup;
    const char           *parent_group;
    const char           *values;
 
-   uint32_t             index;
-   unsigned             index_offset;
-
-   double               min;
-   double               max;
-   
-   uint64_t             flags;
-   uint64_t             free_flags;
-   
    change_handler_t              change_handler;
    change_handler_t              read_handler;
    action_start_handler_t        action_start;
@@ -129,22 +136,22 @@ struct rarch_setting
    union
    {
       bool                       boolean;
+      const char                 *string;
       int                        integer;
       unsigned int               unsigned_integer;
       float                      fraction;
-      const char                 *string;
       const struct retro_keybind *keybind;
    } default_value;
-   
+
    struct
    {
       union
       {
          bool                 *boolean;
+         char                 *string;
          int                  *integer;
          unsigned int         *unsigned_integer;
          float                *fraction;
-         char                 *string;
          struct retro_keybind *keybind;
       } target;
    } value;
@@ -173,13 +180,6 @@ struct rarch_setting
       const char     *off_label;
       const char     *on_label;
    } boolean;
-
-   unsigned          bind_type;
-   enum setting_type browser_selection_type;
-   float             step;
-   const char        *rounding_fraction;
-   bool              enforce_minrange;
-   bool              enforce_maxrange;
 };
 
 struct rarch_setting_info
@@ -356,7 +356,7 @@ bool CONFIG_HEX(
       unsigned int *target,
       enum msg_hash_enums name_enum_idx,
       enum msg_hash_enums SHORT_enum_idx,
-      unsigned int default_value, 
+      unsigned int default_value,
       rarch_setting_group_info_t *group_info,
       rarch_setting_group_info_t *subgroup_info,
       const char *parent_group,
@@ -414,9 +414,7 @@ void settings_data_list_current_add_free_flags(
       rarch_setting_info_t *list_info,
       unsigned values);
 
-enum setting_type setting_get_type(rarch_setting_t *setting);
-
-rarch_setting_t setting_terminator_setting(void);
+#define setting_get_type(setting) ((setting) ? setting->type : ST_NONE)
 
 RETRO_END_DECLS
 

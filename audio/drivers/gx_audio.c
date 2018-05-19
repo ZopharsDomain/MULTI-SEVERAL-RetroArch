@@ -1,7 +1,7 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
- *  Copyright (C) 2011-2016 - Daniel De Matteis
- * 
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
+ *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
  *  ation, either version 3 of the License, or (at your option) any later version.
@@ -28,7 +28,6 @@
 #include <retro_inline.h>
 
 #include "../audio_driver.h"
-#include "../../configuration.h"
 #include "../../defines/gx_defines.h"
 
 typedef struct
@@ -45,8 +44,8 @@ typedef struct
    bool is_paused;
 } gx_audio_t;
 
-static volatile gx_audio_t *gx_audio_data;
-static volatile bool stop_audio;
+static volatile gx_audio_t *gx_audio_data = NULL;
+static volatile bool stop_audio           = false;
 
 static void dma_callback(void)
 {
@@ -69,9 +68,10 @@ static void dma_callback(void)
 }
 
 static void *gx_audio_init(const char *device,
-      unsigned rate, unsigned latency)
+      unsigned rate, unsigned latency,
+      unsigned block_frames,
+      unsigned *new_rate)
 {
-   settings_t *settings = config_get_ptr();
    gx_audio_t *wa       = (gx_audio_t*)memalign(32, sizeof(*wa));
    if (!wa)
       return NULL;
@@ -83,15 +83,16 @@ static void *gx_audio_init(const char *device,
    AIInit(NULL);
    AIRegisterDMACallback(dma_callback);
 
-   if (rate < 33000)
+   //ranges 0-32000 (default low) and 40000-47999 (in settings going down from 48000) -> set to 32000 hz
+   if (rate <= 32000 || (rate >= 40000 && rate < 48000))
    {
       AISetDSPSampleRate(AI_SAMPLERATE_32KHZ);
-      settings->audio.out_rate = 32000;
+      *new_rate = 32000;
    }
-   else
+   else //ranges 32001-39999 (in settings going up from 32000) and 48000-max (default high) -> set to 48000 hz
    {
       AISetDSPSampleRate(AI_SAMPLERATE_48KHZ);
-      settings->audio.out_rate = 48000;
+      *new_rate = 48000;
    }
 
    OSInitThreadQueue(&wa->cond);
@@ -129,9 +130,9 @@ static ssize_t gx_audio_write(void *data, const void *buf_, size_t size)
       if (frames < to_write)
          to_write = frames;
 
-      /* FIXME: Nonblocking audio should break out of loop 
+      /* FIXME: Nonblocking audio should break out of loop
        * when it has nothing to write. */
-      while ((wa->dma_write == wa->dma_next || 
+      while ((wa->dma_write == wa->dma_next ||
                wa->dma_write == wa->dma_busy) && !wa->nonblock)
          OSSleepThread(wa->cond);
 
@@ -173,7 +174,7 @@ static void gx_audio_set_nonblock_state(void *data, bool state)
       wa->nonblock = state;
 }
 
-static bool gx_audio_start(void *data)
+static bool gx_audio_start(void *data, bool is_shutdown)
 {
    gx_audio_t *wa = (gx_audio_t*)data;
 

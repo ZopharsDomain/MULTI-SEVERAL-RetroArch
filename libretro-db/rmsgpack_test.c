@@ -1,4 +1,4 @@
-/* Copyright  (C) 2010-2016 The RetroArch team
+/* Copyright  (C) 2010-2017 The RetroArch team
  *
  * ---------------------------------------------------------------------------------------
  * The following license statement only applies to this file (rmsgpack_test.c).
@@ -186,9 +186,11 @@ static struct rmsgpack_read_callbacks stub_callbacks = {
 int main(void)
 {
    struct stub_state state;
-   RFILE *fd = filestream_open("test.msgpack", RFILE_MODE_READ, 0);
+   RFILE *fd = filestream_open("test.msgpack",
+         RETRO_VFS_FILE_ACCESS_READ,
+         RETRO_VFS_FILE_ACCESS_HINT_NONE);
 
-   state.i = 0;
+   state.i        = 0;
    state.stack[0] = 0;
 
    rmsgpack_read(fd, &stub_callbacks, &state);

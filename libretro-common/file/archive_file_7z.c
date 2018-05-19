@@ -1,4 +1,4 @@
-/* Copyright  (C) 2010-2016 The RetroArch team
+/* Copyright  (C) 2010-2018 The RetroArch team
  *
  * ---------------------------------------------------------------------------------------
  * The following license statement only applies to this file (archive_file_sevenzip.c).
@@ -22,6 +22,7 @@
 
 #include <stdlib.h>
 
+#include <boolean.h>
 #include <file/archive_file.h>
 #include <streams/file_stream.h>
 #include <retro_miscellaneous.h>
@@ -31,13 +32,19 @@
 #include <lists/string_list.h>
 #include <file/file_path.h>
 #include <compat/strl.h>
-#include "../../deps/7zip/7z.h"
-#include "../../deps/7zip/7zAlloc.h"
-#include "../../deps/7zip/7zCrc.h"
-#include "../../deps/7zip/7zFile.h"
+#include <7zip/7z.h>
+#include <7zip/7zCrc.h>
+#include <7zip/7zFile.h>
 
 #define SEVENZIP_MAGIC "7z\xBC\xAF\x27\x1C"
 #define SEVENZIP_MAGIC_LEN 6
+
+/* Assume W-functions do not work below Win2K and Xbox platforms */
+#if defined(_WIN32_WINNT) && _WIN32_WINNT < 0x0500 || defined(_XBOX)
+#ifndef LEGACY_WIN32
+#define LEGACY_WIN32
+#endif
+#endif
 
 struct sevenzip_context_t {
    CFileInStream archiveStream;
@@ -53,22 +60,41 @@ struct sevenzip_context_t {
    file_archive_file_handle_t *handle;
 };
 
+static void *sevenzip_stream_alloc_impl(void *p, size_t size)
+{
+   if (size == 0)
+      return 0;
+   return malloc(size);
+}
+
+static void sevenzip_stream_free_impl(void *p, void *address)
+{
+   (void)p;
+   free(address);
+}
+
+static void *sevenzip_stream_alloc_tmp_impl(void *p, size_t size)
+{
+   (void)p;
+   if (size == 0)
+      return 0;
+   return malloc(size);
+}
+
 static void* sevenzip_stream_new(void)
 {
    struct sevenzip_context_t *sevenzip_context =
          (struct sevenzip_context_t*)calloc(1, sizeof(struct sevenzip_context_t));
 
-   memset(sevenzip_context, 0, sizeof(struct sevenzip_context_t));
-
    /* These are the allocation routines - currently using
     * the non-standard 7zip choices. */
-   sevenzip_context->allocImp.Alloc     = SzAlloc;
-   sevenzip_context->allocImp.Free      = SzFree;
-   sevenzip_context->allocTempImp.Alloc = SzAllocTemp;
-   sevenzip_context->allocTempImp.Free  = SzFreeTemp;
-   sevenzip_context->block_index = 0xFFFFFFFF;
-   sevenzip_context->output = NULL;
-   sevenzip_context->handle = NULL;
+   sevenzip_context->allocImp.Alloc     = sevenzip_stream_alloc_impl;
+   sevenzip_context->allocImp.Free      = sevenzip_stream_free_impl;
+   sevenzip_context->allocTempImp.Alloc = sevenzip_stream_alloc_tmp_impl;
+   sevenzip_context->allocTempImp.Free  = sevenzip_stream_free_impl;
+   sevenzip_context->block_index        = 0xFFFFFFFF;
+   sevenzip_context->output             = NULL;
+   sevenzip_context->handle             = NULL;
 
    return sevenzip_context;
 }
@@ -83,7 +109,7 @@ static void sevenzip_stream_free(void *data)
    if (sevenzip_context->output)
    {
       IAlloc_Free(&sevenzip_context->allocImp, sevenzip_context->output);
-      sevenzip_context->output = NULL;
+      sevenzip_context->output       = NULL;
       sevenzip_context->handle->data = NULL;
    }
 
@@ -111,20 +137,58 @@ static int sevenzip_file_read(
 
    /*These are the allocation routines.
     * Currently using the non-standard 7zip choices. */
-   allocImp.Alloc       = SzAlloc;
-   allocImp.Free        = SzFree;
-   allocTempImp.Alloc   = SzAllocTemp;
-   allocTempImp.Free    = SzFreeTemp;
+   allocImp.Alloc       = sevenzip_stream_alloc_impl;
+   allocImp.Free        = sevenzip_stream_free_impl;
+   allocTempImp.Alloc   = sevenzip_stream_alloc_tmp_impl;
+   allocTempImp.Free    = sevenzip_stream_free_impl;
 
+#if defined(_WIN32) && defined(USE_WINDOWS_FILE) && !defined(LEGACY_WIN32)
+   if (!string_is_empty(path))
+   {
+      wchar_t *pathW = utf8_to_utf16_string_alloc(path);
+
+      if (pathW)
+      {
+         /* Could not open 7zip archive? */
+         if (InFile_OpenW(&archiveStream.file, pathW))
+         {
+            free(pathW);
+            return -1;
+         }
+
+         free(pathW);
+      }
+   }
+#else
    /* Could not open 7zip archive? */
    if (InFile_Open(&archiveStream.file, path))
       return -1;
+#endif
 
    FileInStream_CreateVTable(&archiveStream);
-   LookToRead_CreateVTable(&lookStream, False);
+   LookToRead_CreateVTable(&lookStream, false);
    lookStream.realStream = &archiveStream.s;
    LookToRead_Init(&lookStream);
    CrcGenerateTable();
+
+   db.db.PackSizes               = NULL;
+   db.db.PackCRCsDefined         = NULL;
+   db.db.PackCRCs                = NULL;
+   db.db.Folders                 = NULL;
+   db.db.Files                   = NULL;
+   db.db.NumPackStreams          = 0;
+   db.db.NumFolders              = 0;
+   db.db.NumFiles                = 0;
+   db.startPosAfterHeader        = 0;
+   db.dataPos                    = 0;
+   db.FolderStartPackStreamIndex = NULL;
+   db.PackStreamStartPositions   = NULL;
+   db.FolderStartFileIndex       = NULL;
+   db.FileIndexToFolderIndexMap  = NULL;
+   db.FileNameOffsets            = NULL;
+   db.FileNames.data             = NULL;
+   db.FileNames.size             = 0;
+
    SzArEx_Init(&db);
 
    if (SzArEx_Open(&db, &lookStream.s, &allocImp, &allocTempImp) == SZ_OK)
@@ -177,9 +241,6 @@ static int sevenzip_file_read(
          {
             size_t output_size   = 0;
 
-            /*RARCH_LOG_OUTPUT("Opened archive %s. Now trying to extract %s\n",
-                  path, needle);*/
-
             /* C LZMA SDK does not support chunked extraction - see here:
              * sourceforge.net/p/sevenzip/discussion/45798/thread/6fb59aaf/
              * */
@@ -199,8 +260,6 @@ static int sevenzip_file_read(
 
                if (!filestream_write_file(optional_outfile, ptr, outsize))
                {
-                  /*RARCH_ERR("Could not open outfilepath %s.\n",
-                        optional_outfile);*/
                   res        = SZ_OK;
                   file_found = true;
                   outsize    = -1;
@@ -239,7 +298,7 @@ static int sevenzip_file_read(
    SzArEx_Free(&db, &allocImp);
    File_Close(&archiveStream.file);
 
-   return outsize;
+   return (int)outsize;
 }
 
 static bool sevenzip_stream_decompress_data_to_file_init(
@@ -262,7 +321,7 @@ static int sevenzip_stream_decompress_data_to_file_iterate(void *data)
    struct sevenzip_context_t *sevenzip_context =
          (struct sevenzip_context_t*)data;
 
-   SRes res = SZ_ERROR_FAIL;
+   SRes res                = SZ_ERROR_FAIL;
    size_t output_size      = 0;
    size_t offset           = 0;
    size_t outSizeProcessed = 0;
@@ -291,17 +350,36 @@ static int sevenzip_parse_file_init(file_archive_transfer_t *state,
    if (state->archive_size < SEVENZIP_MAGIC_LEN)
       goto error;
 
-   if (memcmp(state->data, SEVENZIP_MAGIC, SEVENZIP_MAGIC_LEN) != 0)
+   if (string_is_not_equal_fast(state->data, SEVENZIP_MAGIC, SEVENZIP_MAGIC_LEN))
       goto error;
 
    state->stream = sevenzip_context;
 
+#if defined(_WIN32) && defined(USE_WINDOWS_FILE) && !defined(LEGACY_WIN32)
+   if (!string_is_empty(file))
+   {
+      wchar_t *fileW = utf8_to_utf16_string_alloc(file);
+
+      if (fileW)
+      {
+         /* could not open 7zip archive? */
+         if (InFile_OpenW(&sevenzip_context->archiveStream.file, fileW))
+         {
+            free(fileW);
+            goto error;
+         }
+
+         free(fileW);
+      }
+   }
+#else
    /* could not open 7zip archive? */
    if (InFile_Open(&sevenzip_context->archiveStream.file, file))
       goto error;
+#endif
 
    FileInStream_CreateVTable(&sevenzip_context->archiveStream);
-   LookToRead_CreateVTable(&sevenzip_context->lookStream, False);
+   LookToRead_CreateVTable(&sevenzip_context->lookStream, false);
    sevenzip_context->lookStream.realStream = &sevenzip_context->archiveStream.s;
    LookToRead_Init(&sevenzip_context->lookStream);
    CrcGenerateTable();
@@ -366,10 +444,10 @@ static int sevenzip_parse_file_iterate_step_internal(
 
          strlcpy(filename, infile, PATH_MAX_LENGTH);
 
-         *cmode = ARCHIVE_MODE_COMPRESSED;
+         *cmode    = ARCHIVE_MODE_COMPRESSED;
          *checksum = file->Crc;
-         *size = file->Size;
-         *csize = compressed_size;
+         *size     = (uint32_t)file->Size;
+         *csize    = (uint32_t)compressed_size;
       }
    }
 
@@ -424,17 +502,8 @@ static uint32_t sevenzip_stream_crc32_calculate(uint32_t crc,
 const struct file_archive_file_backend sevenzip_backend = {
    sevenzip_stream_new,
    sevenzip_stream_free,
-   NULL,
-   NULL,
-   NULL,
-   NULL,
-   NULL,
-   NULL,
    sevenzip_stream_decompress_data_to_file_init,
    sevenzip_stream_decompress_data_to_file_iterate,
-   NULL,
-   NULL,
-   NULL,
    sevenzip_stream_crc32_calculate,
    sevenzip_file_read,
    sevenzip_parse_file_init,

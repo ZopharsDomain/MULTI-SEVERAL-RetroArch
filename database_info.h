@@ -1,8 +1,7 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
- *  Copyright (C) 2011-2016 - Daniel De Matteis
- *  Copyright (C) 2013-2015 - Jason Fetters
- *  Copyright (C) 2016 - Brad Parker
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
+ *  Copyright (C) 2016-2017 - Brad Parker
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -24,6 +23,7 @@
 
 #include <file/archive_file.h>
 #include <retro_common_api.h>
+#include <queues/task_queue.h>
 
 RETRO_BEGIN_DECLS
 
@@ -47,6 +47,28 @@ enum database_type
    DATABASE_TYPE_CRC_LOOKUP
 };
 
+enum database_query_type
+{
+   DATABASE_QUERY_NONE = 0,
+   DATABASE_QUERY_ENTRY,
+   DATABASE_QUERY_ENTRY_PUBLISHER,
+   DATABASE_QUERY_ENTRY_DEVELOPER,
+   DATABASE_QUERY_ENTRY_ORIGIN,
+   DATABASE_QUERY_ENTRY_FRANCHISE,
+   DATABASE_QUERY_ENTRY_RATING,
+   DATABASE_QUERY_ENTRY_BBFC_RATING,
+   DATABASE_QUERY_ENTRY_ELSPA_RATING,
+   DATABASE_QUERY_ENTRY_ESRB_RATING,
+   DATABASE_QUERY_ENTRY_PEGI_RATING,
+   DATABASE_QUERY_ENTRY_CERO_RATING,
+   DATABASE_QUERY_ENTRY_ENHANCEMENT_HW,
+   DATABASE_QUERY_ENTRY_EDGE_MAGAZINE_RATING,
+   DATABASE_QUERY_ENTRY_EDGE_MAGAZINE_ISSUE,
+   DATABASE_QUERY_ENTRY_FAMITSU_MAGAZINE_RATING,
+   DATABASE_QUERY_ENTRY_RELEASEDATE_MONTH,
+   DATABASE_QUERY_ENTRY_RELEASEDATE_YEAR,
+   DATABASE_QUERY_ENTRY_MAX_USERS
+};
 
 typedef struct
 {
@@ -59,6 +81,18 @@ typedef struct
 
 typedef struct
 {
+   int analog_supported;
+   int rumble_supported;
+   int coop_supported;
+   uint32_t crc32;
+   unsigned size;
+   unsigned famitsu_magazine_rating;
+   unsigned edge_magazine_rating;
+   unsigned edge_magazine_issue;
+   unsigned max_users;
+   unsigned releasemonth;
+   unsigned releaseyear;
+   unsigned tgdb_rating;
    char *name;
    char *rom_name;
    char *serial;
@@ -75,41 +109,16 @@ typedef struct
    char *pegi_rating;
    char *cero_rating;
    char *enhancement_hw;
-   uint32_t crc32;
    char *sha1;
    char *md5;
-   unsigned size;
-   unsigned famitsu_magazine_rating;
-   unsigned edge_magazine_rating;
-   unsigned edge_magazine_issue;
-   unsigned max_users;
-   unsigned releasemonth;
-   unsigned releaseyear;
-   unsigned tgdb_rating;
-   int analog_supported;
-   int rumble_supported;
-   int coop_supported;
    void *userdata;
 } database_info_t;
 
 typedef struct
 {
-   database_info_t *list;
    size_t count;
+   database_info_t *list;
 } database_info_list_t;
-
-typedef struct database_state_handle
-{
-   database_info_list_t *info;
-   struct string_list *list;
-   size_t list_index;
-   size_t entry_index;
-   uint32_t crc;
-   uint32_t archive_crc;
-   uint8_t *buf;
-   char archive_name[255];
-   char serial[4096];
-} database_state_handle_t;
 
 database_info_list_t *database_info_list_new(const char *rdb_path,
       const char *query);
@@ -117,23 +126,16 @@ database_info_list_t *database_info_list_new(const char *rdb_path,
 void database_info_list_free(database_info_list_t *list);
 
 database_info_handle_t *database_info_dir_init(const char *dir,
-      enum database_type type);
+      enum database_type type, retro_task_t *task,
+      bool show_hidden_files);
 
 database_info_handle_t *database_info_file_init(const char *path,
-      enum database_type type);
-
-void database_info_set_type(database_info_handle_t *handle, enum database_type type);
-
-const char *database_info_get_current_element_name(database_info_handle_t *handle);
-
-const char *database_info_get_current_name(database_state_handle_t *handle);
-
-enum database_type database_info_get_type(database_info_handle_t *handle);
+      enum database_type type, retro_task_t *task);
 
 void database_info_free(database_info_handle_t *handle);
 
-int database_info_build_query(
-      char *query, size_t len, const char *label, const char *path);
+int database_info_build_query_enum(
+      char *query, size_t len, enum database_query_type type, const char *path);
 
 /* NOTE: Allocates memory, it is the caller's responsibility to free the
  * memory after it is no longer required. */

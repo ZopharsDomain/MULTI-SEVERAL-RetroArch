@@ -1,6 +1,6 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
- * 
+ *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
  *  ation, either version 3 of the License, or (at your option) any later version.
@@ -13,15 +13,16 @@
  *  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <stdlib.h>
 #include <unistd.h>
 
 #include <sys/ioctl.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 /* Includes and defines for framebuffer size retrieval */
 #include <linux/fb.h>
 #include <linux/vt.h>
-
-#include <streams/file_stream.h>
 
 #ifdef HAVE_CONFIG_H
 #include "../../config.h"
@@ -36,8 +37,6 @@
 #endif
 
 #include "../../frontend/frontend_driver.h"
-#include "../../configuration.h"
-#include "../../runloop.h"
 
 typedef struct
 {
@@ -45,17 +44,20 @@ typedef struct
    egl_ctx_data_t egl;
 #endif
 
-   struct mali_native_window native_window;
+   struct {
+      unsigned short width;
+      unsigned short height;
+   } native_window;
    bool resize;
    unsigned width, height;
+   float refresh_rate;
 } mali_ctx_data_t;
 
-static enum gfx_ctx_api mali_api;
+static enum gfx_ctx_api mali_api           = GFX_CTX_NONE;
 
 static void gfx_ctx_mali_fbdev_destroy(void *data)
 {
-   int fb;
-   RFILE *fd;
+   int fd;
    mali_ctx_data_t *mali = (mali_ctx_data_t*)data;
 
    if (mali)
@@ -69,12 +71,11 @@ static void gfx_ctx_mali_fbdev_destroy(void *data)
    }
 
    /* Clear framebuffer and set cursor on again */
-   fd = filestream_open("/dev/tty", RFILE_MODE_READ_WRITE, -1);
-   fb = filestream_get_fd(fd);
+   fd = open("/dev/tty", O_RDWR);
+   ioctl(fd, VT_ACTIVATE, 5);
+   ioctl(fd, VT_ACTIVATE, 1);
+   close(fd);
 
-   ioctl(fb, VT_ACTIVATE,5);
-   ioctl(fb, VT_ACTIVATE,1);
-   filestream_close(fd);
    system("setterm -cursor on");
 }
 
@@ -87,7 +88,7 @@ static void gfx_ctx_mali_fbdev_get_video_size(void *data,
    *height = mali->height;
 }
 
-static void *gfx_ctx_mali_fbdev_init(void *video_driver)
+static void *gfx_ctx_mali_fbdev_init(video_frame_info_t *video_info, void *video_driver)
 {
 #ifdef HAVE_EGL
    EGLint n;
@@ -114,7 +115,7 @@ static void *gfx_ctx_mali_fbdev_init(void *video_driver)
 #endif
 
 #ifdef HAVE_EGL
-   if (!egl_init_context(&mali->egl, EGL_DEFAULT_DISPLAY,
+   if (!egl_init_context(&mali->egl, EGL_NONE, EGL_DEFAULT_DISPLAY,
             &major, &minor, &n, attribs))
    {
       egl_report_error();
@@ -131,11 +132,9 @@ error:
 }
 
 static void gfx_ctx_mali_fbdev_check_window(void *data, bool *quit,
-      bool *resize, unsigned *width, unsigned *height, unsigned frame_count)
+      bool *resize, unsigned *width, unsigned *height, bool is_shutdown)
 {
    unsigned new_width, new_height;
-
-   (void)frame_count;
 
    gfx_ctx_mali_fbdev_get_video_size(data, &new_width, &new_height);
 
@@ -149,30 +148,8 @@ static void gfx_ctx_mali_fbdev_check_window(void *data, bool *quit,
    *quit   = (bool)frontend_driver_get_signal_handler_state();
 }
 
-static bool gfx_ctx_mali_fbdev_set_resize(void *data,
-      unsigned width, unsigned height)
-{
-   (void)data;
-   (void)width;
-   (void)height;
-   return false;
-}
-
-static void gfx_ctx_mali_fbdev_update_window_title(void *data)
-{
-   char buf[128]        = {0};
-   char buf_fps[128]    = {0};
-   settings_t *settings = config_get_ptr();
-
-   (void)data;
-
-   video_monitor_get_fps(buf, sizeof(buf),
-         buf_fps, sizeof(buf_fps));
-   if (settings->fps_show)
-      runloop_msg_queue_push(buf_fps, 1, 1, false);
-}
-
 static bool gfx_ctx_mali_fbdev_set_video_mode(void *data,
+      video_frame_info_t *video_info,
       unsigned width, unsigned height,
       bool fullscreen)
 {
@@ -182,17 +159,17 @@ static bool gfx_ctx_mali_fbdev_set_video_mode(void *data,
       EGL_NONE
    };
    mali_ctx_data_t *mali = (mali_ctx_data_t*)data;
-   RFILE *fd             = filestream_open("/dev/fb0", RFILE_MODE_READ_WRITE, -1);
-   int fb                = filestream_get_fd(fd);
+   int fd                = open("/dev/fb0", O_RDWR);
 
-   if (ioctl(fb, FBIOGET_VSCREENINFO, &vinfo) < 0)
+   if (ioctl(fd, FBIOGET_VSCREENINFO, &vinfo) < 0)
    {
       RARCH_ERR("Error obtaining framebuffer info.\n");
       goto error;
    }
 
-   filestream_close(fd);
-   
+   close(fd);
+   fd = -1;
+
    width                      = vinfo.xres;
    height                     = vinfo.yres;
 
@@ -201,6 +178,10 @@ static bool gfx_ctx_mali_fbdev_set_video_mode(void *data,
 
    mali->native_window.width  = vinfo.xres;
    mali->native_window.height = vinfo.yres;
+
+   mali->refresh_rate = 1000000.0f / vinfo.pixclock * 1000000.0f /
+         (vinfo.yres + vinfo.upper_margin + vinfo.lower_margin + vinfo.vsync_len) /
+         (vinfo.xres + vinfo.left_margin  + vinfo.right_margin + vinfo.hsync_len);
 
 #ifdef HAVE_EGL
    if (!egl_create_context(&mali->egl, attribs))
@@ -218,19 +199,24 @@ static bool gfx_ctx_mali_fbdev_set_video_mode(void *data,
    return true;
 
 error:
-   if (fd)
-      filestream_close(fd);
+   if (fd >= 0)
+      close(fd);
    RARCH_ERR("[Mali fbdev]: EGL error: %d.\n", eglGetError());
    gfx_ctx_mali_fbdev_destroy(data);
    return false;
 }
 
 static void gfx_ctx_mali_fbdev_input_driver(void *data,
+      const char *name,
       const input_driver_t **input, void **input_data)
 {
-   (void)data;
-   *input = NULL;
+   *input      = NULL;
    *input_data = NULL;
+}
+
+static enum gfx_ctx_api gfx_ctx_mali_fbdev_get_api(void *data)
+{
+   return mali_api;
 }
 
 static bool gfx_ctx_mali_fbdev_bind_api(void *data,
@@ -238,7 +224,11 @@ static bool gfx_ctx_mali_fbdev_bind_api(void *data,
 {
    (void)data;
    mali_api = api;
-   return api == GFX_CTX_OPENGL_ES_API;
+
+   if (api == GFX_CTX_OPENGL_ES_API)
+      return true;
+
+   return false;
 }
 
 static bool gfx_ctx_mali_fbdev_has_focus(void *data)
@@ -254,12 +244,6 @@ static bool gfx_ctx_mali_fbdev_suppress_screensaver(void *data, bool enable)
    return false;
 }
 
-static bool gfx_ctx_mali_fbdev_has_windowed(void *data)
-{
-   (void)data;
-   return false;
-}
-
 static void gfx_ctx_mali_fbdev_set_swap_interval(void *data, unsigned swap_interval)
 {
    mali_ctx_data_t *mali = (mali_ctx_data_t*)data;
@@ -269,7 +253,7 @@ static void gfx_ctx_mali_fbdev_set_swap_interval(void *data, unsigned swap_inter
 #endif
 }
 
-static void gfx_ctx_mali_fbdev_swap_buffers(void *data)
+static void gfx_ctx_mali_fbdev_swap_buffers(void *data, void *data2)
 {
    mali_ctx_data_t *mali = (mali_ctx_data_t*)data;
 
@@ -307,24 +291,33 @@ static void gfx_ctx_mali_fbdev_set_flags(void *data, uint32_t flags)
    (void)data;
 }
 
+static float gfx_ctx_mali_fbdev_get_refresh_rate(void *data)
+{
+   mali_ctx_data_t *mali = (mali_ctx_data_t*)data;
+
+   return mali->refresh_rate;
+}
+
 const gfx_ctx_driver_t gfx_ctx_mali_fbdev = {
    gfx_ctx_mali_fbdev_init,
    gfx_ctx_mali_fbdev_destroy,
+   gfx_ctx_mali_fbdev_get_api,
    gfx_ctx_mali_fbdev_bind_api,
    gfx_ctx_mali_fbdev_set_swap_interval,
    gfx_ctx_mali_fbdev_set_video_mode,
    gfx_ctx_mali_fbdev_get_video_size,
+   gfx_ctx_mali_fbdev_get_refresh_rate,
    NULL, /* get_video_output_size */
    NULL, /* get_video_output_prev */
    NULL, /* get_video_output_next */
    NULL, /* get_metrics */
    NULL,
-   gfx_ctx_mali_fbdev_update_window_title,
+   NULL, /* update_title */
    gfx_ctx_mali_fbdev_check_window,
-   gfx_ctx_mali_fbdev_set_resize,
+   NULL, /* set_resize */
    gfx_ctx_mali_fbdev_has_focus,
    gfx_ctx_mali_fbdev_suppress_screensaver,
-   gfx_ctx_mali_fbdev_has_windowed,
+   NULL, /* has_windowed */
    gfx_ctx_mali_fbdev_swap_buffers,
    gfx_ctx_mali_fbdev_input_driver,
    gfx_ctx_mali_fbdev_get_proc_address,

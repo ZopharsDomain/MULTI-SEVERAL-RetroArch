@@ -1,7 +1,7 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
- *  Copyright (C) 2011-2016 - Daniel De Matteis
- * 
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
+ *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
  *  ation, either version 3 of the License, or (at your option) any later version.
@@ -22,7 +22,6 @@
 #include <retro_inline.h>
 
 #include "../audio_driver.h"
-#include "../../configuration.h"
 
 #define SOUND_FREQUENCY 48000
 #define MAX_BUFFER 2048
@@ -35,10 +34,11 @@ typedef struct
 } xenon_audio_t;
 
 static void *xenon360_audio_init(const char *device,
-      unsigned rate, unsigned latency)
+      unsigned rate, unsigned latency,
+      unsigned block_frames,
+      unsigned *new_rate)
 {
    static bool inited = false;
-   settings_t *settings = config_get_ptr();
 
    if (!inited)
    {
@@ -46,7 +46,8 @@ static void *xenon360_audio_init(const char *device,
       inited = true;
    }
 
-   settings->audio.out_rate = SOUND_FREQUENCY;
+   *new_rate = SOUND_FREQUENCY;
+
    return calloc(1, sizeof(xenon_audio_t));
 }
 
@@ -69,7 +70,7 @@ static ssize_t xenon360_audio_write(void *data, const void *buf, size_t size)
    {
       while (xenon_sound_get_unplayed() >= MAX_BUFFER)
       {
-         /* libxenon doesn't have proper 
+         /* libxenon doesn't have proper
           * synchronization primitives for this... */
          udelay(50);
       }
@@ -111,7 +112,7 @@ static void xenon360_audio_set_nonblock_state(void *data, bool state)
       xa->nonblock = state;
 }
 
-static bool xenon360_audio_start(void *data)
+static bool xenon360_audio_start(void *data, bool is_shutdown)
 {
    xenon_audio_t *xa = data;
    xa->is_paused = false;

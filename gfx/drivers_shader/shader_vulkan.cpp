@@ -1,5 +1,6 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2016 - Hans-Kristian Arntzen
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
  * 
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -14,7 +15,7 @@
  */
 
 #include "shader_vulkan.h"
-#include "glslang_util.hpp"
+#include "glslang_util.h"
 #include <vector>
 #include <memory>
 #include <functional>
@@ -25,10 +26,11 @@
 
 #include <compat/strl.h>
 #include <formats/image.h>
+#include <retro_miscellaneous.h>
 
-#include "slang_reflection.hpp"
+#include "slang_reflection.h"
 
-#include "../video_shader_driver.h"
+#include "../video_driver.h"
 #include "../../verbosity.h"
 #include "../../msg_hash.h"
 
@@ -44,7 +46,7 @@ static const uint32_t opaque_frag[] =
 
 static unsigned num_miplevels(unsigned width, unsigned height)
 {
-   unsigned size   = std::max(width, height);
+   unsigned size   = MAX(width, height);
    unsigned levels = 0;
    while (size)
    {
@@ -52,62 +54,6 @@ static unsigned num_miplevels(unsigned width, unsigned height)
       size >>= 1;
    }
    return levels;
-}
-
-static void image_layout_transition_levels(
-      VkCommandBuffer cmd, VkImage image, uint32_t levels,
-      VkImageLayout old_layout, VkImageLayout new_layout,
-      VkAccessFlags src_access, VkAccessFlags dst_access,
-      VkPipelineStageFlags src_stages, VkPipelineStageFlags dst_stages)
-{
-   VkImageMemoryBarrier barrier        = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
-
-   barrier.srcAccessMask               = src_access;
-   barrier.dstAccessMask               = dst_access;
-   barrier.oldLayout                   = old_layout;
-   barrier.newLayout                   = new_layout;
-   barrier.srcQueueFamilyIndex         = VK_QUEUE_FAMILY_IGNORED;
-   barrier.dstQueueFamilyIndex         = VK_QUEUE_FAMILY_IGNORED;
-   barrier.image                       = image;
-   barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-   barrier.subresourceRange.levelCount = levels;
-   barrier.subresourceRange.layerCount = VK_REMAINING_ARRAY_LAYERS;
-
-   vkCmdPipelineBarrier(cmd,
-         src_stages,
-         dst_stages,
-         false,
-         0, nullptr,
-         0, nullptr,
-         1, &barrier);
-}
-
-static void image_layout_transition(
-      VkCommandBuffer cmd, VkImage image,
-      VkImageLayout old_layout, VkImageLayout new_layout,
-      VkAccessFlags src_access, VkAccessFlags dst_access,
-      VkPipelineStageFlags src_stages, VkPipelineStageFlags dst_stages)
-{
-   image_layout_transition_levels(cmd, image, VK_REMAINING_MIP_LEVELS,
-         old_layout, new_layout,
-         src_access, dst_access,
-         src_stages, dst_stages);
-}
-
-static uint32_t find_memory_type(
-      const VkPhysicalDeviceMemoryProperties &mem_props,
-      uint32_t device_reqs, uint32_t host_reqs)
-{
-   uint32_t i;
-   for (i = 0; i < VK_MAX_MEMORY_TYPES; i++)
-   {
-      if ((device_reqs & (1u << i)) &&
-            (mem_props.memoryTypes[i].propertyFlags & host_reqs) == host_reqs)
-         return i;
-   }
-
-   RARCH_ERR("[Vulkan]: Failed to find valid memory type. This should never happen.");
-   abort();
 }
 
 static uint32_t find_memory_type_fallback(
@@ -122,7 +68,7 @@ static uint32_t find_memory_type_fallback(
          return i;
    }
 
-   return find_memory_type(mem_props, device_reqs, 0);
+   return vulkan_find_memory_type(&mem_props, device_reqs, 0);
 }
 
 static void build_identity_matrix(float *data)
@@ -279,23 +225,23 @@ class Framebuffer
       void generate_mips(VkCommandBuffer cmd);
 
    private:
-      VkDevice device = VK_NULL_HANDLE;
       const VkPhysicalDeviceMemoryProperties &memory_properties;
-      VkImage image = VK_NULL_HANDLE;
-      VkImageView view = VK_NULL_HANDLE;
+      VkDevice device     = VK_NULL_HANDLE;
+      VkImage image       = VK_NULL_HANDLE;
+      VkImageView view    = VK_NULL_HANDLE;
       VkImageView fb_view = VK_NULL_HANDLE;
       Size2D size;
       VkFormat format;
       unsigned max_levels;
-      unsigned levels = 0;
+      unsigned levels           = 0;
 
       VkFramebuffer framebuffer = VK_NULL_HANDLE;
-      VkRenderPass render_pass = VK_NULL_HANDLE;
+      VkRenderPass render_pass  = VK_NULL_HANDLE;
 
       struct
       {
-         size_t size = 0;
-         uint32_t type = 0;
+         size_t size           = 0;
+         uint32_t type         = 0;
          VkDeviceMemory memory = VK_NULL_HANDLE;
       } memory;
 
@@ -861,8 +807,8 @@ bool vulkan_filter_chain::init_feedback()
    return true;
 }
 
-template <typename M, typename P>
-static bool set_unique_map(M &m, const string &name, const P &p)
+template <typename P>
+static bool vk_shader_set_unique_map(unordered_map<string, P> &m, const string &name, const P &p)
 {
    auto itr = m.find(name);
    if (itr != end(m))
@@ -890,19 +836,19 @@ bool vulkan_filter_chain::init_alias()
 
       unsigned i = &pass - passes.data();
 
-      if (!set_unique_map(common.texture_semantic_map, name,
+      if (!vk_shader_set_unique_map(common.texture_semantic_map, name,
                slang_texture_semantic_map{ SLANG_TEXTURE_SEMANTIC_PASS_OUTPUT, i }))
          return false;
 
-      if (!set_unique_map(common.texture_semantic_uniform_map, name + "Size",
+      if (!vk_shader_set_unique_map(common.texture_semantic_uniform_map, name + "Size",
                slang_texture_semantic_map{ SLANG_TEXTURE_SEMANTIC_PASS_OUTPUT, i }))
          return false;
 
-      if (!set_unique_map(common.texture_semantic_map, name + "Feedback",
+      if (!vk_shader_set_unique_map(common.texture_semantic_map, name + "Feedback",
                slang_texture_semantic_map{ SLANG_TEXTURE_SEMANTIC_PASS_FEEDBACK, i }))
          return false;
 
-      if (!set_unique_map(common.texture_semantic_uniform_map, name + "FeedbackSize",
+      if (!vk_shader_set_unique_map(common.texture_semantic_uniform_map, name + "FeedbackSize",
                slang_texture_semantic_map{ SLANG_TEXTURE_SEMANTIC_PASS_FEEDBACK, i }))
          return false;
    }
@@ -910,11 +856,11 @@ bool vulkan_filter_chain::init_alias()
    for (auto &lut : common.luts)
    {
       unsigned i = &lut - common.luts.data();
-      if (!set_unique_map(common.texture_semantic_map, lut->get_id(),
+      if (!vk_shader_set_unique_map(common.texture_semantic_map, lut->get_id(),
                slang_texture_semantic_map{ SLANG_TEXTURE_SEMANTIC_USER, i }))
          return false;
 
-      if (!set_unique_map(common.texture_semantic_uniform_map, lut->get_id() + "Size",
+      if (!vk_shader_set_unique_map(common.texture_semantic_uniform_map, lut->get_id() + "Size",
                slang_texture_semantic_map{ SLANG_TEXTURE_SEMANTIC_USER, i }))
          return false;
    }
@@ -1046,8 +992,8 @@ void vulkan_filter_chain::update_history(DeferredDisposer &disposer, VkCommandBu
    // Transition input texture to something appropriate.
    if (input_texture.layout != VK_IMAGE_LAYOUT_GENERAL)
    {
-      image_layout_transition(cmd,
-            input_texture.image,
+      vulkan_image_layout_transition_levels(cmd,
+            input_texture.image,VK_REMAINING_MIP_LEVELS,
             input_texture.layout,
             VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
             0,
@@ -1073,8 +1019,8 @@ void vulkan_filter_chain::update_history(DeferredDisposer &disposer, VkCommandBu
    // Transition input texture back.
    if (input_texture.layout != VK_IMAGE_LAYOUT_GENERAL)
    {
-      image_layout_transition(cmd,
-            input_texture.image,
+      vulkan_image_layout_transition_levels(cmd,
+            input_texture.image,VK_REMAINING_MIP_LEVELS,
             VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
             input_texture.layout,
             0,
@@ -1203,8 +1149,8 @@ Buffer::Buffer(VkDevice device,
    VkMemoryAllocateInfo alloc = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
    alloc.allocationSize       = mem_reqs.size;
 
-   alloc.memoryTypeIndex      = find_memory_type(
-         mem_props, mem_reqs.memoryTypeBits,
+   alloc.memoryTypeIndex      = vulkan_find_memory_type(
+         &mem_props, mem_reqs.memoryTypeBits,
          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
          | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
@@ -1755,7 +1701,7 @@ bool Pass::build()
 
    for (auto &param : parameters)
    {
-      if (!set_unique_map(semantic_map, param.id,
+      if (!vk_shader_set_unique_map(semantic_map, param.id,
                slang_semantic_map{ SLANG_SEMANTIC_FLOAT_PARAMETER, j }))
          return false;
       j++;
@@ -2054,8 +2000,8 @@ void Pass::build_commands(
    // the passes that end up on-screen.
    if (!final_pass)
    {
-      // Render.
-      image_layout_transition_levels(cmd,
+      /* Render. */
+      vulkan_image_layout_transition_levels(cmd,
             framebuffer->get_image(), 1,
             VK_IMAGE_LAYOUT_UNDEFINED,
             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
@@ -2066,17 +2012,12 @@ void Pass::build_commands(
 
       VkRenderPassBeginInfo rp_info = { 
          VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
-      VkClearValue clear_value;
-      clear_value.color.float32[0]     = 0.0f;
-      clear_value.color.float32[1]     = 0.0f;
-      clear_value.color.float32[2]     = 0.0f;
-      clear_value.color.float32[3]     = 1.0f;
       rp_info.renderPass               = framebuffer->get_render_pass();
       rp_info.framebuffer              = framebuffer->get_framebuffer();
       rp_info.renderArea.extent.width  = current_framebuffer_size.width;
       rp_info.renderArea.extent.height = current_framebuffer_size.height;
-      rp_info.clearValueCount          = 1;
-      rp_info.pClearValues             = &clear_value;
+      rp_info.clearValueCount          = 0;
+      rp_info.pClearValues             = nullptr;
 
       vkCmdBeginRenderPass(cmd, &rp_info, VK_SUBPASS_CONTENTS_INLINE);
    }
@@ -2143,9 +2084,9 @@ void Pass::build_commands(
       else
       {
          // Barrier to sync with next pass.
-         image_layout_transition(
+         vulkan_image_layout_transition_levels(
                cmd,
-               framebuffer->get_image(),
+               framebuffer->get_image(),VK_REMAINING_MIP_LEVELS,
                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
@@ -2175,17 +2116,18 @@ Framebuffer::Framebuffer(
 
 void Framebuffer::clear(VkCommandBuffer cmd)
 {
-   image_layout_transition(cmd, image,
+   VkClearColorValue color;
+   VkImageSubresourceRange range;
+
+   vulkan_image_layout_transition_levels(cmd, image,VK_REMAINING_MIP_LEVELS,
          VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
          0, VK_ACCESS_TRANSFER_WRITE_BIT,
          VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
          VK_PIPELINE_STAGE_TRANSFER_BIT);
 
-   VkClearColorValue color;
    memset(&color, 0, sizeof(color));
-
-   VkImageSubresourceRange range;
    memset(&range, 0, sizeof(range));
+
    range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
    range.levelCount = 1;
    range.layerCount = 1;
@@ -2193,7 +2135,7 @@ void Framebuffer::clear(VkCommandBuffer cmd)
    vkCmdClearColorImage(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
          &color, 1, &range);
 
-   image_layout_transition(cmd, image,
+   vulkan_image_layout_transition_levels(cmd, image,VK_REMAINING_MIP_LEVELS,
          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
          VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
          VK_PIPELINE_STAGE_TRANSFER_BIT,
@@ -2202,6 +2144,7 @@ void Framebuffer::clear(VkCommandBuffer cmd)
 
 void Framebuffer::generate_mips(VkCommandBuffer cmd)
 {
+   unsigned i;
    // This is run every frame, so make sure
    // we aren't opting into the "lazy" way of doing this. :)
    VkImageMemoryBarrier barriers[2] = {
@@ -2248,7 +2191,7 @@ void Framebuffer::generate_mips(VkCommandBuffer cmd)
          0, nullptr,
          2, barriers);
 
-   for (unsigned i = 1; i < levels; i++)
+   for (i = 1; i < levels; i++)
    {
       // For subsequent passes, we have to transition from DST_OPTIMAL to SRC_OPTIMAL,
       // but only do so one mip-level at a time.
@@ -2271,23 +2214,23 @@ void Framebuffer::generate_mips(VkCommandBuffer cmd)
       }
 
       VkImageBlit blit_region = {};
-      unsigned src_width = std::max(size.width >> (i - 1), 1u);
-      unsigned src_height = std::max(size.height >> (i - 1), 1u);
-      unsigned target_width = std::max(size.width >> i, 1u);
-      unsigned target_height = std::max(size.height >> i, 1u);
+      unsigned src_width      = MAX(size.width >> (i - 1), 1u);
+      unsigned src_height     = MAX(size.height >> (i - 1), 1u);
+      unsigned target_width   = MAX(size.width >> i, 1u);
+      unsigned target_height  = MAX(size.height >> i, 1u);
 
-      blit_region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-      blit_region.srcSubresource.mipLevel = i - 1;
+      blit_region.srcSubresource.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+      blit_region.srcSubresource.mipLevel       = i - 1;
       blit_region.srcSubresource.baseArrayLayer = 0;
-      blit_region.srcSubresource.layerCount = 1;
-      blit_region.dstSubresource = blit_region.srcSubresource;
-      blit_region.dstSubresource.mipLevel = i;
-      blit_region.srcOffsets[1].x = src_width;
-      blit_region.srcOffsets[1].y = src_height;
-      blit_region.srcOffsets[1].z = 1;
-      blit_region.dstOffsets[1].x = target_width;
-      blit_region.dstOffsets[1].y = target_height;
-      blit_region.dstOffsets[1].z = 1;
+      blit_region.srcSubresource.layerCount     = 1;
+      blit_region.dstSubresource                = blit_region.srcSubresource;
+      blit_region.dstSubresource.mipLevel       = i;
+      blit_region.srcOffsets[1].x               = src_width;
+      blit_region.srcOffsets[1].y               = src_height;
+      blit_region.srcOffsets[1].z               = 1;
+      blit_region.dstOffsets[1].x               = target_width;
+      blit_region.dstOffsets[1].y               = target_height;
+      blit_region.dstOffsets[1].z               = 1;
 
       vkCmdBlitImage(cmd,
             image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -2329,27 +2272,29 @@ void Framebuffer::generate_mips(VkCommandBuffer cmd)
 void Framebuffer::copy(VkCommandBuffer cmd,
       VkImage src_image, VkImageLayout src_layout)
 {
-   image_layout_transition(cmd, image,
+   VkImageCopy region;
+
+   vulkan_image_layout_transition_levels(cmd, image,VK_REMAINING_MIP_LEVELS,
          VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
          0, VK_ACCESS_TRANSFER_WRITE_BIT,
          VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
          VK_PIPELINE_STAGE_TRANSFER_BIT);
 
-   VkImageCopy region;
    memset(&region, 0, sizeof(region));
+
    region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
    region.srcSubresource.layerCount = 1;
-   region.dstSubresource = region.srcSubresource;
-   region.extent.width = size.width;
-   region.extent.height = size.height;
-   region.extent.depth = 1;
+   region.dstSubresource            = region.srcSubresource;
+   region.extent.width              = size.width;
+   region.extent.height             = size.height;
+   region.extent.depth              = 1;
 
    vkCmdCopyImage(cmd,
          src_image, src_layout,
          image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
          1, &region);
 
-   image_layout_transition(cmd, image,
+   vulkan_image_layout_transition_levels(cmd, image,VK_REMAINING_MIP_LEVELS,
          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
          VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
          VK_PIPELINE_STAGE_TRANSFER_BIT,
@@ -2548,7 +2493,6 @@ vulkan_filter_chain_t *vulkan_filter_chain_create_default(
    if (!chain)
       return nullptr;
 
-   memset(&pass_info, 0, sizeof(pass_info));
    pass_info.scale_type_x  = VULKAN_FILTER_CHAIN_SCALE_VIEWPORT;
    pass_info.scale_type_y  = VULKAN_FILTER_CHAIN_SCALE_VIEWPORT;
    pass_info.scale_x       = 1.0f;
@@ -2557,6 +2501,8 @@ vulkan_filter_chain_t *vulkan_filter_chain_create_default(
    pass_info.source_filter = filter;
    pass_info.mip_filter    = VULKAN_FILTER_CHAIN_NEAREST;
    pass_info.address       = VULKAN_FILTER_CHAIN_ADDRESS_CLAMP_TO_EDGE;
+   pass_info.max_levels    = 0;
+
    chain->set_pass_info(0, pass_info);
 
    chain->set_shader(0, VK_SHADER_STAGE_VERTEX_BIT,
@@ -2650,7 +2596,9 @@ static unique_ptr<StaticTexture> vulkan_filter_chain_load_lut(VkCommandBuffer cm
       vulkan_filter_chain *chain,
       const video_shader_lut *shader)
 {
+   unsigned i;
    texture_image image;
+   unique_ptr<Buffer> buffer;
    VkMemoryRequirements mem_reqs;
    VkImageCreateInfo image_info    = { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
    VkImageViewCreateInfo view_info = { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
@@ -2660,7 +2608,11 @@ static unique_ptr<StaticTexture> vulkan_filter_chain_load_lut(VkCommandBuffer cm
    VkImageView view                = VK_NULL_HANDLE;
    VkBufferImageCopy region        = {};
    void *ptr                       = nullptr;
-   unique_ptr<Buffer> buffer;
+
+   image.width              = 0;
+   image.height             = 0;
+   image.pixels             = NULL;
+   image.supports_rgba      = video_driver_supports_rgba();
 
    if (!image_texture_load(&image, shader->path))
       return {};
@@ -2680,9 +2632,9 @@ static unique_ptr<StaticTexture> vulkan_filter_chain_load_lut(VkCommandBuffer cm
    image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
    vkCreateImage(info->device, &image_info, nullptr, &tex);
    vkGetImageMemoryRequirements(info->device, tex, &mem_reqs);
-   alloc.allocationSize = mem_reqs.size;
-   alloc.memoryTypeIndex = find_memory_type(
-         *info->memory_properties,
+   alloc.allocationSize     = mem_reqs.size;
+   alloc.memoryTypeIndex    = vulkan_find_memory_type(
+         &*info->memory_properties,
          mem_reqs.memoryTypeBits,
          VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
@@ -2709,7 +2661,7 @@ static unique_ptr<StaticTexture> vulkan_filter_chain_load_lut(VkCommandBuffer cm
    memcpy(ptr, image.pixels, image.width * image.height * sizeof(uint32_t));
    buffer->unmap();
 
-   image_layout_transition(cmd, tex,
+   vulkan_image_layout_transition_levels(cmd, tex,VK_REMAINING_MIP_LEVELS,
          VK_IMAGE_LAYOUT_UNDEFINED,
          shader->mipmap ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
          0, VK_ACCESS_TRANSFER_WRITE_BIT,
@@ -2727,30 +2679,30 @@ static unique_ptr<StaticTexture> vulkan_filter_chain_load_lut(VkCommandBuffer cm
          shader->mipmap ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
          1, &region);
 
-   for (unsigned i = 1; i < image_info.mipLevels; i++)
+   for (i = 1; i < image_info.mipLevels; i++)
    {
       VkImageBlit blit_region = {};
-      unsigned src_width = std::max(image.width >> (i - 1), 1u);
-      unsigned src_height = std::max(image.height >> (i - 1), 1u);
-      unsigned target_width = std::max(image.width >> i, 1u);
-      unsigned target_height = std::max(image.height >> i, 1u);
+      unsigned src_width      = MAX(image.width >> (i - 1), 1u);
+      unsigned src_height     = MAX(image.height >> (i - 1), 1u);
+      unsigned target_width   = MAX(image.width >> i, 1u);
+      unsigned target_height  = MAX(image.height >> i, 1u);
 
-      blit_region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-      blit_region.srcSubresource.mipLevel = i - 1;
+      blit_region.srcSubresource.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+      blit_region.srcSubresource.mipLevel       = i - 1;
       blit_region.srcSubresource.baseArrayLayer = 0;
-      blit_region.srcSubresource.layerCount = 1;
-      blit_region.dstSubresource = blit_region.srcSubresource;
-      blit_region.dstSubresource.mipLevel = i;
-      blit_region.srcOffsets[1].x = src_width;
-      blit_region.srcOffsets[1].y = src_height;
-      blit_region.srcOffsets[1].z = 1;
-      blit_region.dstOffsets[1].x = target_width;
-      blit_region.dstOffsets[1].y = target_height;
-      blit_region.dstOffsets[1].z = 1;
+      blit_region.srcSubresource.layerCount     = 1;
+      blit_region.dstSubresource                = blit_region.srcSubresource;
+      blit_region.dstSubresource.mipLevel       = i;
+      blit_region.srcOffsets[1].x               = src_width;
+      blit_region.srcOffsets[1].y               = src_height;
+      blit_region.srcOffsets[1].z               = 1;
+      blit_region.dstOffsets[1].x               = target_width;
+      blit_region.dstOffsets[1].y               = target_height;
+      blit_region.dstOffsets[1].z               = 1;
 
-      // Only injects execution and memory barriers,
-      // not actual transition.
-      image_layout_transition(cmd, tex,
+      /* Only injects execution and memory barriers,
+       * not actual transition. */
+      vulkan_image_layout_transition_levels(cmd, tex, VK_REMAINING_MIP_LEVELS,
             VK_IMAGE_LAYOUT_GENERAL,
             VK_IMAGE_LAYOUT_GENERAL,
             VK_ACCESS_TRANSFER_WRITE_BIT,
@@ -2764,7 +2716,7 @@ static unique_ptr<StaticTexture> vulkan_filter_chain_load_lut(VkCommandBuffer cm
             1, &blit_region, VK_FILTER_LINEAR);
    }
 
-   image_layout_transition(cmd, tex,
+   vulkan_image_layout_transition_levels(cmd, tex,VK_REMAINING_MIP_LEVELS,
          shader->mipmap ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
          VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
@@ -2846,12 +2798,13 @@ vulkan_filter_chain_t *vulkan_filter_chain_create_from_preset(
       const struct vulkan_filter_chain_create_info *info,
       const char *path, vulkan_filter_chain_filter filter)
 {
+   unsigned i;
    unique_ptr<video_shader> shader{ new video_shader() };
    if (!shader)
       return nullptr;
 
    unique_ptr<config_file_t, ConfigDeleter> conf{ config_file_new(path) };
-   if (!path)
+   if (!conf)
       return nullptr;
 
    if (!video_shader_read_conf_cgp(conf.get(), shader.get()))
@@ -2872,15 +2825,24 @@ vulkan_filter_chain_t *vulkan_filter_chain_create_from_preset(
 
    shader->num_parameters = 0;
 
-   for (unsigned i = 0; i < shader->passes; i++)
+   for (i = 0; i < shader->passes; i++)
    {
-      const video_shader_pass *pass = &shader->pass[i];
+      glslang_output output;
+      struct vulkan_filter_chain_pass_info pass_info;
+      const video_shader_pass *pass      = &shader->pass[i];
       const video_shader_pass *next_pass =
          i + 1 < shader->passes ? &shader->pass[i + 1] : nullptr;
-      struct vulkan_filter_chain_pass_info pass_info;
-      memset(&pass_info, 0, sizeof(pass_info));
 
-      glslang_output output;
+      pass_info.scale_type_x  = VULKAN_FILTER_CHAIN_SCALE_ORIGINAL;
+      pass_info.scale_type_y  = VULKAN_FILTER_CHAIN_SCALE_ORIGINAL;
+      pass_info.scale_x       = 0.0f;
+      pass_info.scale_y       = 0.0f;
+      pass_info.rt_format     = VK_FORMAT_UNDEFINED; 
+      pass_info.source_filter = VULKAN_FILTER_CHAIN_LINEAR;
+      pass_info.mip_filter    = VULKAN_FILTER_CHAIN_LINEAR;
+      pass_info.address       = VULKAN_FILTER_CHAIN_ADDRESS_REPEAT;
+      pass_info.max_levels    = 0;
+
       if (!glslang_compile_shader(pass->source.path, &output))
       {
          RARCH_ERR("Failed to compile shader: \"%s\".\n",
@@ -2897,7 +2859,8 @@ vulkan_filter_chain_t *vulkan_filter_chain_create_from_preset(
          }
 
          auto itr = find_if(shader->parameters, shader->parameters + shader->num_parameters,
-               [&](const video_shader_parameter &param) {
+               [&](const video_shader_parameter &param)
+               {
                   return meta_param.id == param.id;
                });
 
@@ -2958,15 +2921,14 @@ vulkan_filter_chain_t *vulkan_filter_chain_create_from_preset(
             pass->filter == RARCH_FILTER_LINEAR ? VULKAN_FILTER_CHAIN_LINEAR : 
             VULKAN_FILTER_CHAIN_NEAREST;
       }
-      pass_info.address = wrap_to_address(pass->wrap);
+      pass_info.address    = wrap_to_address(pass->wrap);
+      pass_info.max_levels = 1;
 
       // TODO: Expose max_levels in slangp.
       // CGP format is a bit awkward in that it uses mipmap_input,
       // so we much check if next pass needs the mipmapping.
       if (next_pass && next_pass->mipmap)
          pass_info.max_levels = ~0u;
-      else
-         pass_info.max_levels = 1;
 
       pass_info.mip_filter = pass->filter != RARCH_FILTER_NEAREST && pass_info.max_levels > 1
          ? VULKAN_FILTER_CHAIN_LINEAR : VULKAN_FILTER_CHAIN_NEAREST;
@@ -2993,7 +2955,8 @@ vulkan_filter_chain_t *vulkan_filter_chain_create_from_preset(
             pass_info.rt_format = tmpinfo.swapchain.format;
 
             if (explicit_format)
-               RARCH_WARN("[slang]: Using explicit format for last pass in chain, but it is not rendered to framebuffer, using swapchain format instead.\n");
+               RARCH_WARN("[slang]: Using explicit format for last pass in chain,"
+                     " but it is not rendered to framebuffer, using swapchain format instead.\n");
          }
          else
          {
@@ -3059,16 +3022,19 @@ vulkan_filter_chain_t *vulkan_filter_chain_create_from_preset(
    if (last_pass_is_fbo)
    {
       struct vulkan_filter_chain_pass_info pass_info;
-      memset(&pass_info, 0, sizeof(pass_info));
-      pass_info.scale_type_x = VULKAN_FILTER_CHAIN_SCALE_VIEWPORT;
-      pass_info.scale_type_y = VULKAN_FILTER_CHAIN_SCALE_VIEWPORT;
-      pass_info.scale_x = 1.0f;
-      pass_info.scale_y = 1.0f;
-      pass_info.rt_format = tmpinfo.swapchain.format;
+
+      pass_info.scale_type_x  = VULKAN_FILTER_CHAIN_SCALE_VIEWPORT;
+      pass_info.scale_type_y  = VULKAN_FILTER_CHAIN_SCALE_VIEWPORT;
+      pass_info.scale_x       = 1.0f;
+      pass_info.scale_y       = 1.0f;
+
+      pass_info.rt_format     = tmpinfo.swapchain.format;
 
       pass_info.source_filter = filter;
-      pass_info.mip_filter = VULKAN_FILTER_CHAIN_NEAREST;
-      pass_info.address = VULKAN_FILTER_CHAIN_ADDRESS_CLAMP_TO_EDGE;
+      pass_info.mip_filter    = VULKAN_FILTER_CHAIN_NEAREST;
+      pass_info.address       = VULKAN_FILTER_CHAIN_ADDRESS_CLAMP_TO_EDGE;
+
+      pass_info.max_levels    = 0;
 
       chain->set_pass_info(shader->passes, pass_info);
 

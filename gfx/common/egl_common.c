@@ -1,6 +1,6 @@
 /*  RetroArch - A frontend for libretro.
- *  Copyright (c) 2011-2016 - Daniel De Matteis
- * 
+ *  Copyright (c) 2011-2017 - Daniel De Matteis
+ *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
  *  ation, either version 3 of the License, or (at your option) any later version.
@@ -29,7 +29,7 @@
 #include "../../verbosity.h"
 #include "../../frontend/frontend_driver.h"
 
-bool g_egl_inited;
+bool g_egl_inited    = false;
 
 unsigned g_egl_major = 0;
 unsigned g_egl_minor = 0;
@@ -44,16 +44,52 @@ void egl_report_error(void)
          str = "EGL_SUCCESS";
          break;
 
-      case EGL_BAD_DISPLAY:
-         str = "EGL_BAD_DISPLAY";
+      case EGL_BAD_ACCESS:
+         str = "EGL_BAD_ACCESS";
          break;
 
-      case EGL_BAD_SURFACE:
-         str = "EGL_BAD_SURFACE";
+      case EGL_BAD_ALLOC:
+         str = "EGL_BAD_ALLOC";
+         break;
+
+      case EGL_BAD_ATTRIBUTE:
+         str = "EGL_BAD_ATTRIBUTE";
+         break;
+
+      case EGL_BAD_CONFIG:
+         str = "EGL_BAD_CONFIG";
          break;
 
       case EGL_BAD_CONTEXT:
          str = "EGL_BAD_CONTEXT";
+         break;
+
+      case EGL_BAD_CURRENT_SURFACE:
+         str = "EGL_BAD_CURRENT_SURFACE";
+         break;
+
+      case EGL_BAD_DISPLAY:
+         str = "EGL_BAD_DISPLAY";
+         break;
+
+      case EGL_BAD_MATCH:
+         str = "EGL_BAD_MATCH";
+         break;
+
+      case EGL_BAD_NATIVE_PIXMAP:
+         str = "EGL_BAD_NATIVE_PIXMAP";
+         break;
+
+      case EGL_BAD_NATIVE_WINDOW:
+         str = "EGL_BAD_NATIVE_WINDOW";
+         break;
+
+      case EGL_BAD_PARAMETER:
+         str = "EGL_BAD_PARAMETER";
+         break;
+
+      case EGL_BAD_SURFACE:
+         str = "EGL_BAD_SURFACE";
          break;
 
       default:
@@ -138,7 +174,7 @@ void egl_swap_buffers(void *data)
 void egl_set_swap_interval(egl_ctx_data_t *egl, unsigned interval)
 {
    /* Can be called before initialization.
-    * Some contexts require that swap interval 
+    * Some contexts require that swap interval
     * is known at startup time.
     */
    egl->interval = interval;
@@ -172,18 +208,121 @@ void egl_get_video_size(egl_ctx_data_t *egl, unsigned *width, unsigned *height)
    }
 }
 
+bool check_egl_version(int minMajorVersion, int minMinorVersion)
+{
+   int count;
+   int major, minor;
+   const char *str = eglQueryString(EGL_NO_DISPLAY, EGL_VERSION);
+
+   if (!str)
+      return false;
+
+   count = sscanf(str, "%d.%d", &major, &minor);
+   if (count != 2)
+      return false;
+
+   if (major < minMajorVersion)
+      return false;
+
+   if (major > minMajorVersion)
+      return true;
+
+   if (minor >= minMinorVersion)
+      return true;
+
+   return false;
+}
+
+bool check_egl_client_extension(const char *name)
+{
+   size_t nameLen;
+   const char *str = eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS);
+
+   /* The EGL implementation doesn't support client extensions at all. */
+   if (!str)
+      return false;
+
+   nameLen = strlen(name);
+   while (*str != '\0')
+   {
+      /* Use strspn and strcspn to find the start position and length of each
+       * token in the extension string. Using strtok could also work, but
+       * that would require allocating a copy of the string. */
+      size_t len = strcspn(str, " ");
+      if (len == nameLen && strncmp(str, name, nameLen) == 0)
+         return true;
+      str += len;
+      str += strspn(str, " ");
+   }
+
+   return false;
+}
+
+static EGLDisplay get_egl_display(EGLenum platform, void *native)
+{
+   if (platform != EGL_NONE)
+   {
+      /* If the client library supports at least EGL 1.5, then we can call
+       * eglGetPlatformDisplay. Otherwise, see if eglGetPlatformDisplayEXT
+       * is available. */
+#if defined(EGL_VERSION_1_5)
+      if (check_egl_version(1, 5))
+      {
+         typedef EGLDisplay (EGLAPIENTRY * pfn_eglGetPlatformDisplay)
+            (EGLenum platform, void *native_display, const EGLAttrib *attrib_list);
+         pfn_eglGetPlatformDisplay ptr_eglGetPlatformDisplay;
+
+         RARCH_LOG("[EGL] Found EGL client version >= 1.5, trying eglGetPlatformDisplay\n");
+         ptr_eglGetPlatformDisplay = (pfn_eglGetPlatformDisplay)
+            eglGetProcAddress("eglGetPlatformDisplay");
+         if (ptr_eglGetPlatformDisplay != NULL)
+         {
+            EGLDisplay dpy = ptr_eglGetPlatformDisplay(platform, native, NULL);
+            if (dpy != EGL_NO_DISPLAY)
+               return dpy;
+         }
+      }
+#endif /* defined(EGL_VERSION_1_5) */
+
+#if defined(EGL_EXT_platform_base)
+      if (check_egl_client_extension("EGL_EXT_platform_base"))
+      {
+         PFNEGLGETPLATFORMDISPLAYEXTPROC ptr_eglGetPlatformDisplayEXT;
+
+         RARCH_LOG("[EGL] Found EGL_EXT_platform_base, trying eglGetPlatformDisplayEXT\n");
+         ptr_eglGetPlatformDisplayEXT = (PFNEGLGETPLATFORMDISPLAYEXTPROC)
+            eglGetProcAddress("eglGetPlatformDisplayEXT");
+         if (ptr_eglGetPlatformDisplayEXT != NULL)
+         {
+            EGLDisplay dpy = ptr_eglGetPlatformDisplayEXT(platform, native, NULL);
+            if (dpy != EGL_NO_DISPLAY)
+               return dpy;
+         }
+      }
+#endif /* defined(EGL_EXT_platform_base) */
+   }
+
+   /* Either the caller didn't provide a platform type, or the EGL
+    * implementation doesn't support eglGetPlatformDisplay. In this case, try
+    * eglGetDisplay and hope for the best. */
+   RARCH_LOG("[EGL] Falling back to eglGetDisplay\n");
+   return eglGetDisplay((EGLNativeDisplayType) native);
+}
+
 bool egl_init_context(egl_ctx_data_t *egl,
+      EGLenum platform,
       void *display_data,
       EGLint *major, EGLint *minor,
      EGLint *n, const EGLint *attrib_ptr)
 {
-   NativeDisplayType display = (NativeDisplayType)display_data;
-   egl->dpy = eglGetDisplay(display);
-   if (!egl->dpy)
+   EGLDisplay dpy = get_egl_display(platform, display_data);
+   if (dpy == EGL_NO_DISPLAY)
    {
       RARCH_ERR("[EGL]: Couldn't get EGL display.\n");
       return false;
    }
+
+   egl->dpy = dpy;
 
    if (!eglInitialize(egl->dpy, major, minor))
       return false;
@@ -201,12 +340,14 @@ bool egl_init_context(egl_ctx_data_t *egl,
 
 bool egl_create_context(egl_ctx_data_t *egl, const EGLint *egl_attribs)
 {
-   egl->ctx    = eglCreateContext(egl->dpy, egl->config, EGL_NO_CONTEXT,
+   EGLContext ctx = eglCreateContext(egl->dpy, egl->config, EGL_NO_CONTEXT,
          egl_attribs);
-   egl->hw_ctx = NULL;
 
-   if (egl->ctx == EGL_NO_CONTEXT)
+   if (ctx == EGL_NO_CONTEXT)
       return false;
+
+   egl->ctx    = ctx;
+   egl->hw_ctx = NULL;
 
    if (egl->use_hw_ctx)
    {

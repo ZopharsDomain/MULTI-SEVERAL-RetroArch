@@ -1,7 +1,7 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
- *  Copyright (C) 2011-2016 - Daniel De Matteis
- *  Copyright (C) 2016 - Brad Parker
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
+ *  Copyright (C) 2016-2017 - Brad Parker
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -67,6 +67,8 @@ void menu_dialog_show_message(
       enum menu_dialog_type type, enum msg_hash_enums msg);
 
 bool menu_dialog_is_active(void);
+
+void menu_dialog_set_current_id(unsigned id);
 
 void menu_dialog_set_active(bool on);
 

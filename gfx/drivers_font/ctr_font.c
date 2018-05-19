@@ -1,6 +1,6 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
- *  Copyright (C) 2011-2016 - Daniel De Matteis
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -21,19 +21,23 @@
 #include <encodings/utf.h>
 #include <3ds.h>
 
+#include <retro_math.h>
+
 #include "../font_driver.h"
 #include "../video_driver.h"
 #include "../common/ctr_common.h"
 #include "../drivers/ctr_gu.h"
 #include "../../ctr/gpu_old.h"
 
-#include "../../configuration.h"
 #include "../../verbosity.h"
 
 /* FIXME: this is just a workaround to avoid
  * using ctrGuCopyImage, since it seems to cause
  * a freeze/blackscreen when used here. */
-//#define FONT_TEXTURE_IN_VRAM
+
+#if 0
+#define FONT_TEXTURE_IN_VRAM
+#endif
 
 typedef struct
 {
@@ -43,7 +47,8 @@ typedef struct
    void* font_data;
 } ctr_font_t;
 
-static void* ctr_font_init_font(void* data, const char* font_path, float font_size)
+static void* ctr_font_init_font(void* data, const char* font_path,
+      float font_size, bool is_threaded)
 {
    const struct font_atlas* atlas = NULL;
    ctr_font_t* font = (ctr_font_t*)calloc(1, sizeof(*font));
@@ -94,7 +99,7 @@ static void* ctr_font_init_font(void* data, const char* font_path, float font_si
    return font;
 }
 
-static void ctr_font_free_font(void* data)
+static void ctr_font_free_font(void* data, bool is_threaded)
 {
    ctr_font_t* font = (ctr_font_t*)data;
 
@@ -148,33 +153,34 @@ static int ctr_font_get_message_width(void* data, const char* msg,
 }
 
 static void ctr_font_render_line(
-   ctr_font_t* font, const char* msg, unsigned msg_len,
-   float scale, const unsigned int color, float pos_x,
-   float pos_y, unsigned text_align)
+      video_frame_info_t *video_info,
+      ctr_font_t* font, const char* msg, unsigned msg_len,
+      float scale, const unsigned int color, float pos_x,
+      float pos_y, unsigned text_align)
 {
-   int x, y, delta_x, delta_y;
-   unsigned width, height;
    unsigned i;
 
-   ctr_video_t* ctr = (ctr_video_t*)video_driver_get_ptr(false);
-   ctr_vertex_t* v;
-   video_driver_get_size(&width, &height);
+   ctr_vertex_t* v  = NULL;
+   ctr_video_t* ctr = (ctr_video_t*)video_info->userdata;
+   unsigned width   = video_info->width;
+   unsigned height  = video_info->height;
+   int x            = roundf(pos_x * width);
+   int y            = roundf((1.0f - pos_y) * height);
+   int delta_x      = 0;
+   int delta_y      = 0;
 
-   x       = roundf(pos_x * width);
-   y       = roundf((1.0f - pos_y) * height);
-   delta_x = 0;
-   delta_y = 0;
-
+   if (!ctr)
+      return;
 
    switch (text_align)
    {
-   case TEXT_ALIGN_RIGHT:
-      x -= ctr_font_get_message_width(font, msg, msg_len, scale);
-      break;
+      case TEXT_ALIGN_RIGHT:
+         x -= ctr_font_get_message_width(font, msg, msg_len, scale);
+         break;
 
-   case TEXT_ALIGN_CENTER:
-      x -= ctr_font_get_message_width(font, msg, msg_len, scale) / 2;
-      break;
+      case TEXT_ALIGN_CENTER:
+         x -= ctr_font_get_message_width(font, msg, msg_len, scale) / 2;
+         break;
    }
 
    if ((ctr->vertex_cache.size - (ctr->vertex_cache.current - ctr->vertex_cache.buffer)) < msg_len)
@@ -227,7 +233,8 @@ static void ctr_font_render_line(
       return;
 
    ctrGuSetVertexShaderFloatUniform(0, (float*)&font->scale_vector, 1);
-   GSPGPU_FlushDataCache(ctr->vertex_cache.current, (v - ctr->vertex_cache.current) * sizeof(ctr_vertex_t));
+   GSPGPU_FlushDataCache(ctr->vertex_cache.current,
+         (v - ctr->vertex_cache.current) * sizeof(ctr_vertex_t));
    ctrGuSetAttributeBuffers(2,
                             VIRT_TO_PHYS(ctr->vertex_cache.current),
                             CTRGU_ATTRIBFMT(GPU_SHORT, 4) << 0 |
@@ -241,18 +248,25 @@ static void ctr_font_render_line(
                  GPU_TEVOPERANDS(GPU_TEVOP_RGB_SRC_R, GPU_TEVOP_RGB_SRC_ALPHA, 0),
                  GPU_MODULATE, GPU_MODULATE,
                  color);
-//   printf("%s\n", msg);
-//   DEBUG_VAR(color);
-//   GPU_SetTexEnv(0, GPU_TEXTURE0, GPU_TEXTURE0, 0, GPU_TEVOPERANDS(GPU_TEVOP_RGB_SRC_R, 0, 0), GPU_REPLACE, GPU_REPLACE, 0);
-   ctrGuSetTexture(GPU_TEXUNIT0, VIRT_TO_PHYS(font->texture.data), font->texture.width, font->texture.height,
-                   GPU_TEXTURE_MAG_FILTER(GPU_NEAREST)  | GPU_TEXTURE_MIN_FILTER(GPU_NEAREST) |
-                   GPU_TEXTURE_WRAP_S(GPU_CLAMP_TO_EDGE) | GPU_TEXTURE_WRAP_T(GPU_CLAMP_TO_EDGE),
-                   GPU_L8);
+
+#if 0
+   printf("%s\n", msg);
+   DEBUG_VAR(color);
+   GPU_SetTexEnv(0, GPU_TEXTURE0, GPU_TEXTURE0, 0,
+         GPU_TEVOPERANDS(GPU_TEVOP_RGB_SRC_R, 0, 0), GPU_REPLACE, GPU_REPLACE, 0);
+#endif
+
+   ctrGuSetTexture(GPU_TEXUNIT0, VIRT_TO_PHYS(font->texture.data),
+         font->texture.width, font->texture.height,
+         GPU_TEXTURE_MAG_FILTER(GPU_NEAREST)  | GPU_TEXTURE_MIN_FILTER(GPU_NEAREST) |
+         GPU_TEXTURE_WRAP_S(GPU_CLAMP_TO_EDGE) | GPU_TEXTURE_WRAP_T(GPU_CLAMP_TO_EDGE),
+         GPU_L8);
 
    GPU_SetViewport(NULL,
-                   VIRT_TO_PHYS(ctr->drawbuffers.top.left),
-                   0, 0, CTR_TOP_FRAMEBUFFER_HEIGHT,
-                   ctr->video_mode == CTR_VIDEO_MODE_800x240 ? CTR_TOP_FRAMEBUFFER_WIDTH * 2 : CTR_TOP_FRAMEBUFFER_WIDTH);
+         VIRT_TO_PHYS(ctr->drawbuffers.top.left),
+         0, 0, CTR_TOP_FRAMEBUFFER_HEIGHT,
+         ctr->video_mode == CTR_VIDEO_MODE_800x240
+         ? CTR_TOP_FRAMEBUFFER_WIDTH * 2 : CTR_TOP_FRAMEBUFFER_WIDTH);
 
    GPU_DrawArray(GPU_GEOMETRY_PRIM, 0, v - ctr->vertex_cache.current);
 
@@ -265,36 +279,40 @@ static void ctr_font_render_line(
       GPU_DrawArray(GPU_GEOMETRY_PRIM, 0, v - ctr->vertex_cache.current);
    }
 
-
-
-
-//   v = font->vertices;
-//   v->x0 = 0;
-//   v->y0 = 0;
-//   v->u0 = 0;
-//   v->v0 = 0;
-//   v->x1 = font->texture.width;
-//   v->y1 = font->texture.height;
-//   v->u1 = font->texture.width;
-//   v->v1 = font->texture.height;
-//   GPU_DrawArray(GPU_GEOMETRY_PRIM, 0, 1);
+#if 0
+   v = font->vertices;
+   v->x0 = 0;
+   v->y0 = 0;
+   v->u0 = 0;
+   v->v0 = 0;
+   v->x1 = font->texture.width;
+   v->y1 = font->texture.height;
+   v->u1 = font->texture.width;
+   v->v1 = font->texture.height;
+   GPU_DrawArray(GPU_GEOMETRY_PRIM, 0, 1);
+#endif
 
    GPU_SetTexEnv(0, GPU_TEXTURE0, GPU_TEXTURE0, 0, 0, GPU_REPLACE, GPU_REPLACE, 0);
-   //   DEBUG_VAR(v - font->vertices);
-   //   v = font->vertices;
-   //   printf("OSDMSG: %s\n", msg);
-   //   printf("vertex : (%i,%i,%i,%i) - (%i,%i,%i,%i)\n",
-   //          v->x0, v->y0, v->x1, v->y1,
-   //          v->u0, v->v0, v->u1, v->v1);
 
-//   printf("%s\n", msg);
+#if 0
+   DEBUG_VAR(v - font->vertices);
+   v = font->vertices;
+   printf("OSDMSG: %s\n", msg);
+   printf("vertex : (%i,%i,%i,%i) - (%i,%i,%i,%i)\n",
+         v->x0, v->y0, v->x1, v->y1,
+         v->u0, v->v0, v->u1, v->v1);
+
+   printf("%s\n", msg);
+#endif
+
    ctr->vertex_cache.current = v;
 }
 
 static void ctr_font_render_message(
-   ctr_font_t* font, const char* msg, float scale,
-   const unsigned int color, float pos_x, float pos_y,
-   unsigned text_align)
+      video_frame_info_t *video_info,
+      ctr_font_t* font, const char* msg, float scale,
+      const unsigned int color, float pos_x, float pos_y,
+      unsigned text_align)
 {
    int lines = 0;
    float line_height;
@@ -305,7 +323,7 @@ static void ctr_font_render_message(
    /* If the font height is not supported just draw as usual */
    if (!font->font_driver->get_line_height)
    {
-      ctr_font_render_line(font, msg, strlen(msg),
+      ctr_font_render_line(video_info, font, msg, strlen(msg),
                            scale, color, pos_x, pos_y, text_align);
       return;
    }
@@ -320,7 +338,7 @@ static void ctr_font_render_message(
       if (delim)
       {
          unsigned msg_len = delim - msg;
-         ctr_font_render_line(font, msg, msg_len,
+         ctr_font_render_line(video_info, font, msg, msg_len,
                               scale, color, pos_x, pos_y - (float)lines * line_height,
                               text_align);
          msg += msg_len + 1;
@@ -329,7 +347,7 @@ static void ctr_font_render_message(
       else
       {
          unsigned msg_len = strlen(msg);
-         ctr_font_render_line(font, msg, msg_len,
+         ctr_font_render_line(video_info, font, msg, msg_len,
                               scale, color, pos_x, pos_y - (float)lines * line_height,
                               text_align);
          break;
@@ -337,80 +355,80 @@ static void ctr_font_render_message(
    }
 }
 
-static void ctr_font_render_msg(void* data, const char* msg,
-                                const void* userdata)
+static void ctr_font_render_msg(
+      video_frame_info_t *video_info,
+      void* data, const char* msg,
+      const struct font_params *params)
 {
    float x, y, scale, drop_mod, drop_alpha;
-   unsigned color, color_dark, r, g, b, alpha, r_dark, g_dark, b_dark, alpha_dark;
-   unsigned width, height;
    int drop_x, drop_y;
    unsigned max_glyphs;
    enum text_alignment text_align;
-   settings_t* settings = config_get_ptr();
-   ctr_font_t* font = (ctr_font_t*)data;
-   const struct font_params* params = (const struct font_params*)userdata;
+   unsigned color, color_dark, r, g, b,
+            alpha, r_dark, g_dark, b_dark, alpha_dark;
+   ctr_font_t                * font = (ctr_font_t*)data;
+   unsigned width                   = video_info->width;
+   unsigned height                  = video_info->height;
 
    if (!font || !msg || !*msg)
       return;
 
-   video_driver_get_size(&width, &height);
-
    if (params)
    {
-//      printf("%s\n", msg);
-      x           = params->x;
-      y           = params->y;
-      scale       = params->scale;
-      text_align  = params->text_align;
-      drop_x      = params->drop_x;
-      drop_y      = params->drop_y;
-      drop_mod    = params->drop_mod;
-      drop_alpha  = params->drop_alpha;
-      r              = FONT_COLOR_GET_RED(params->color);
-      g              = FONT_COLOR_GET_GREEN(params->color);
-      b              = FONT_COLOR_GET_BLUE(params->color);
-      alpha          = FONT_COLOR_GET_ALPHA(params->color);
-      color          = params->color;
-//      color          = COLOR_ABGR(r, g, b, alpha);
+      x                    = params->x;
+      y                    = params->y;
+      scale                = params->scale;
+      text_align           = params->text_align;
+      drop_x               = params->drop_x;
+      drop_y               = params->drop_y;
+      drop_mod             = params->drop_mod;
+      drop_alpha           = params->drop_alpha;
+
+      r                    = FONT_COLOR_GET_RED(params->color);
+      g                    = FONT_COLOR_GET_GREEN(params->color);
+      b                    = FONT_COLOR_GET_BLUE(params->color);
+      alpha                = FONT_COLOR_GET_ALPHA(params->color);
+
+      color                = params->color;
    }
    else
    {
-      x           = settings->video.msg_pos_x;
-      y           = settings->video.msg_pos_y;
-      scale       = 1.0f;
-      text_align  = TEXT_ALIGN_LEFT;
+      x              = video_info->font_msg_pos_x;
+      y              = video_info->font_msg_pos_y;
+      scale          = 1.0f;
+      text_align     = TEXT_ALIGN_LEFT;
 
-      r           = (settings->video.msg_color_r * 255);
-      g           = (settings->video.msg_color_g * 255);
-      b           = (settings->video.msg_color_b * 255);
+      r              = (video_info->font_msg_color_r * 255);
+      g              = (video_info->font_msg_color_g * 255);
+      b              = (video_info->font_msg_color_b * 255);
       alpha          = 255;
       color          = COLOR_ABGR(r, g, b, alpha);
 
-      drop_x = -2;
-      drop_y = -2;
-      drop_mod = 0.3f;
-      drop_alpha = 1.0f;
+      drop_x         = -2;
+      drop_y         = -2;
+      drop_mod       = 0.3f;
+      drop_alpha     = 1.0f;
    }
 
-   max_glyphs = strlen(msg);
+   max_glyphs        = strlen(msg);
 
    if (drop_x || drop_y)
-      max_glyphs *= 2;
+      max_glyphs    *= 2;
 
    if (drop_x || drop_y)
    {
-      r_dark        = r * drop_mod;
-      g_dark        = g * drop_mod;
-      b_dark        = b * drop_mod;
+      r_dark         = r * drop_mod;
+      g_dark         = g * drop_mod;
+      b_dark         = b * drop_mod;
       alpha_dark     = alpha * drop_alpha;
-      color_dark = COLOR_ABGR(r_dark, g_dark, b_dark, alpha_dark);
+      color_dark     = COLOR_ABGR(r_dark, g_dark, b_dark, alpha_dark);
 
-      ctr_font_render_message(font, msg, scale, color_dark,
+      ctr_font_render_message(video_info, font, msg, scale, color_dark,
                               x + scale * drop_x / width, y +
                               scale * drop_y / height, text_align);
    }
 
-   ctr_font_render_message(font, msg, scale,
+   ctr_font_render_message(video_info, font, msg, scale,
                            color, x, y, text_align);
 }
 
@@ -428,11 +446,6 @@ static const struct font_glyph* ctr_font_get_glyph(
    return font->font_driver->get_glyph((void*)font->font_driver, code);
 }
 
-static void ctr_font_flush_block(void* data)
-{
-   (void)data;
-}
-
 static void ctr_font_bind_block(void* data, void* userdata)
 {
    (void)data;
@@ -447,6 +460,6 @@ font_renderer_t ctr_font =
    "ctrfont",
    ctr_font_get_glyph,
    ctr_font_bind_block,
-   ctr_font_flush_block,
+   NULL,                         /* flush_block */
    ctr_font_get_message_width,
 };

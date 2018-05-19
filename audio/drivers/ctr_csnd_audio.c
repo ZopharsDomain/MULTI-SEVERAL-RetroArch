@@ -1,5 +1,5 @@
 /*  RetroArch - A frontend for libretro.
- *  Copyright (C) 2014-2016 - Ali Bouhlel
+ *  Copyright (C) 2014-2017 - Ali Bouhlel
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -16,11 +16,10 @@
 #include <3ds.h>
 #include <string.h>
 #include <malloc.h>
+#include <retro_miscellaneous.h>
+#include <retro_timers.h>
 
 #include "../audio_driver.h"
-#include "../../configuration.h"
-#include "../../performance_counters.h"
-#include "../../runloop.h"
 
 typedef struct
 {
@@ -50,7 +49,7 @@ typedef struct
 static void ctr_csnd_audio_update_playpos(ctr_csnd_audio_t* ctr)
 {
    uint64_t current_tick   = svcGetSystemTick();
-   uint32_t samples_played = (current_tick - ctr->cpu_ticks_last) 
+   uint32_t samples_played = (current_tick - ctr->cpu_ticks_last)
       / CTR_CSND_CPU_TICKS_PER_SAMPLE;
 
    ctr->playpos   = (ctr->playpos + samples_played) & CTR_CSND_AUDIO_COUNT_MASK;
@@ -95,7 +94,8 @@ Result csndPlaySound_custom(int chn, u32 flags, float vol, float pan,
 
 	if (loopMode == CSND_LOOPMODE_NORMAL && paddr1 > paddr0)
 	{
-		// Now that the first block is playing, configure the size of the subsequent blocks
+		/* Now that the first block is playing,
+       * configure the size of the subsequent blocks */
 		size -= paddr1 - paddr0;
 		CSND_SetBlock(chn, 1, paddr1, size);
 	}
@@ -103,10 +103,11 @@ Result csndPlaySound_custom(int chn, u32 flags, float vol, float pan,
 	return 0;
 }
 
-static void *ctr_csnd_audio_init(const char *device, unsigned rate, unsigned latency)
+static void *ctr_csnd_audio_init(const char *device, unsigned rate, unsigned latency,
+      unsigned block_frames,
+      unsigned *new_rate)
 {
    ctr_csnd_audio_t *ctr = (ctr_csnd_audio_t*)calloc(1, sizeof(ctr_csnd_audio_t));
-   settings_t *settings  = config_get_ptr();
 
    if (!ctr)
       return NULL;
@@ -115,7 +116,7 @@ static void *ctr_csnd_audio_init(const char *device, unsigned rate, unsigned lat
    (void)rate;
    (void)latency;
 
-   settings->audio.out_rate  = CTR_CSND_AUDIO_RATE;
+   *new_rate                 = CTR_CSND_AUDIO_RATE;
 
    ctr->l                    = linearAlloc(CTR_CSND_AUDIO_SIZE);
    ctr->r                    = linearAlloc(CTR_CSND_AUDIO_SIZE);
@@ -148,7 +149,9 @@ static void ctr_csnd_audio_free(void *data)
 {
    ctr_csnd_audio_t* ctr = (ctr_csnd_audio_t*)data;
 
-//   csndExit();
+#if 0
+   csndExit();
+#endif
    CSND_SetPlayState(0x8, 0);
    CSND_SetPlayState(0x9, 0);
    csndExecCmds(false);
@@ -164,7 +167,6 @@ static ssize_t ctr_csnd_audio_write(void *data, const void *buf, size_t size)
    int i;
    uint32_t samples_played                     = 0;
    uint64_t current_tick                       = 0;
-   static struct retro_perf_counter ctraudio_f = {0};
    const uint16_t                         *src = buf;
    ctr_csnd_audio_t                       *ctr = (ctr_csnd_audio_t*)data;
 
@@ -172,9 +174,6 @@ static ssize_t ctr_csnd_audio_write(void *data, const void *buf, size_t size)
    (void)buf;
    (void)samples_played;
    (void)current_tick;
-
-   performance_counter_init(&ctraudio_f, "ctraudio_f");
-   performance_counter_start(&ctraudio_f);
 
    ctr_csnd_audio_update_playpos(ctr);
 
@@ -206,13 +205,11 @@ static ssize_t ctr_csnd_audio_write(void *data, const void *buf, size_t size)
    GSPGPU_FlushDataCache(ctr->l, CTR_CSND_AUDIO_SIZE);
    GSPGPU_FlushDataCache(ctr->r, CTR_CSND_AUDIO_SIZE);
 
-   performance_counter_stop(&ctraudio_f);
-
    return size;
 }
 
 static bool ctr_csnd_audio_stop(void *data)
-{   
+{
    ctr_csnd_audio_t* ctr = (ctr_csnd_audio_t*)data;
 
    /* using SetPlayState would make tracking the playback
@@ -241,14 +238,13 @@ static bool ctr_csnd_audio_alive(void *data)
    return ctr->playing;
 }
 
-static bool ctr_csnd_audio_start(void *data)
+static bool ctr_csnd_audio_start(void *data, bool is_shutdown)
 {
    ctr_csnd_audio_t* ctr = (ctr_csnd_audio_t*)data;
 
    /* Prevents restarting audio when the menu
     * is toggled off on shutdown */
-
-   if (runloop_ctl(RUNLOOP_CTL_IS_SHUTDOWN, NULL))
+   if (is_shutdown)
       return true;
 
 #if 0

@@ -1,6 +1,6 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
- *  Copyright (C) 2011-2016 - Daniel De Matteis
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -19,24 +19,30 @@
 
 #include <retro_common_api.h>
 
+#include "../gfx/video_driver.h"
+
 RETRO_BEGIN_DECLS
+
+struct video_shader *menu_shader_get(void);
+
+void menu_shader_manager_free(void);
 
 /**
  * menu_shader_manager_init:
  *
  * Initializes shader manager.
  **/
-void menu_shader_manager_init(void);
+bool menu_shader_manager_init(void);
 
 /**
  * menu_shader_manager_set_preset:
- * @shader                   : Shader handle.   
+ * @shader                   : Shader handle.
  * @type                     : Type of shader.
  * @preset_path              : Preset path to load from.
  *
  * Sets shader preset.
  **/
-void menu_shader_manager_set_preset(
+bool menu_shader_manager_set_preset(
       void *data, unsigned type, const char *preset_path);
 
 /**
@@ -51,11 +57,11 @@ bool menu_shader_manager_save_preset(
 
 /**
  * menu_shader_manager_get_type:
- * @shader                   : shader handle     
+ * @shader                   : shader handle
  *
  * Gets type of shader.
  *
- * Returns: type of shader. 
+ * Returns: type of shader.
  **/
 unsigned menu_shader_manager_get_type(const void *data);
 
@@ -65,6 +71,20 @@ unsigned menu_shader_manager_get_type(const void *data);
  * Apply shader state changes.
  **/
 void menu_shader_manager_apply_changes(void);
+
+int menu_shader_manager_clear_num_passes(void);
+
+int menu_shader_manager_clear_parameter(unsigned i);
+
+int menu_shader_manager_clear_pass_filter(unsigned i);
+
+void menu_shader_manager_clear_pass_scale(unsigned i);
+
+void menu_shader_manager_clear_pass_path(unsigned i);
+
+void menu_shader_manager_decrement_amount_passes(void);
+
+void menu_shader_manager_increment_amount_passes(void);
 
 RETRO_END_DECLS
 

@@ -1,5 +1,5 @@
 /* RetroArch - A frontend for libretro.
- *  Copyright (C) 2011-2016 - Daniel De Matteis
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
  *
  * RetroArch is free software: you can redistribute it and/or modify it under the terms
  * of the GNU General Public License as published by the Free Software Found-
@@ -97,7 +97,7 @@ static enum ui_msg_window_response ui_msg_window_win32_warning(ui_msg_window_sta
    return ui_msg_window_win32_response(state, MessageBoxA(NULL, (LPCSTR)state->text, (LPCSTR)state->title, flags));
 }
 
-const ui_msg_window_t ui_msg_window_win32 = {
+ui_msg_window_t ui_msg_window_win32 = {
    ui_msg_window_win32_error,
    ui_msg_window_win32_information,
    ui_msg_window_win32_question,

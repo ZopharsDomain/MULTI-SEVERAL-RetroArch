@@ -1,7 +1,7 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
- *  Copyright (C) 2011-2016 - Daniel De Matteis
- * 
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
+ *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
  *  ation, either version 3 of the License, or (at your option) any later version.
@@ -16,7 +16,7 @@
 
 /* Null context. */
 
-#include "../video_context_driver.h"
+#include "../video_driver.h"
 
 static void gfx_ctx_null_swap_interval(void *data, unsigned interval)
 {
@@ -25,9 +25,8 @@ static void gfx_ctx_null_swap_interval(void *data, unsigned interval)
 }
 
 static void gfx_ctx_null_check_window(void *data, bool *quit,
-      bool *resize, unsigned *width, unsigned *height, unsigned frame_count)
+      bool *resize, unsigned *width, unsigned *height, bool is_shutdown)
 {
-   (void)frame_count;
    (void)data;
    (void)quit;
    (void)width;
@@ -35,20 +34,7 @@ static void gfx_ctx_null_check_window(void *data, bool *quit,
    (void)resize;
 }
 
-static void gfx_ctx_null_swap_buffers(void *data)
-{
-   (void)data;
-}
-
-static bool gfx_ctx_null_set_resize(void *data, unsigned width, unsigned height)
-{
-   (void)data;
-   (void)width;
-   (void)height;
-   return false;
-}
-
-static void gfx_ctx_null_update_window_title(void *data)
+static void gfx_ctx_null_swap_buffers(void *data, void *data2)
 {
    (void)data;
 }
@@ -61,6 +47,7 @@ static void gfx_ctx_null_get_video_size(void *data, unsigned *width, unsigned *h
 }
 
 static bool gfx_ctx_null_set_video_mode(void *data,
+      video_frame_info_t *video_info,
       unsigned width, unsigned height,
       bool fullscreen)
 {
@@ -77,7 +64,9 @@ static void gfx_ctx_null_destroy(void *data)
    (void)data;
 }
 
-static void gfx_ctx_null_input_driver(void *data, const input_driver_t **input, void **input_data)
+static void gfx_ctx_null_input_driver(void *data,
+      const char *name,
+      const input_driver_t **input, void **input_data)
 {
    (void)data;
    (void)input;
@@ -97,10 +86,9 @@ static bool gfx_ctx_null_suppress_screensaver(void *data, bool enable)
    return false;
 }
 
-static bool gfx_ctx_null_has_windowed(void *data)
+static enum gfx_ctx_api gfx_ctx_null_get_api(void *data)
 {
-   (void)data;
-   return true;
+   return GFX_CTX_NONE;
 }
 
 static bool gfx_ctx_null_bind_api(void *data, enum gfx_ctx_api api, unsigned major, unsigned minor)
@@ -125,7 +113,7 @@ static void gfx_ctx_null_bind_hw_render(void *data, bool enable)
    (void)enable;
 }
 
-static void *gfx_ctx_null_init(void *video_driver)
+static void *gfx_ctx_null_init(video_frame_info_t *video_info, void *video_driver)
 {
    (void)video_driver;
 
@@ -148,21 +136,23 @@ static void gfx_ctx_null_set_flags(void *data, uint32_t flags)
 const gfx_ctx_driver_t gfx_ctx_null = {
    gfx_ctx_null_init,
    gfx_ctx_null_destroy,
+   gfx_ctx_null_get_api,
    gfx_ctx_null_bind_api,
    gfx_ctx_null_swap_interval,
    gfx_ctx_null_set_video_mode,
    gfx_ctx_null_get_video_size,
+   NULL, /* get_refresh_rate */
    NULL, /* get_video_output_size */
    NULL, /* get_video_output_prev */
    NULL, /* get_video_output_next */
    NULL, /* get_metrics */
    NULL,
-   gfx_ctx_null_update_window_title,
+   NULL, /* update_title */
    gfx_ctx_null_check_window,
-   gfx_ctx_null_set_resize,
+   NULL, /* set_resize */
    gfx_ctx_null_has_focus,
    gfx_ctx_null_suppress_screensaver,
-   gfx_ctx_null_has_windowed,
+   NULL, /* has_windowed */
    gfx_ctx_null_swap_buffers,
    gfx_ctx_null_input_driver,
    NULL,

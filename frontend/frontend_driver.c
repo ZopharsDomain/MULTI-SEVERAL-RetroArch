@@ -1,6 +1,6 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
- *  Copyright (C) 2011-2016 - Daniel De Matteis
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -18,6 +18,10 @@
 
 #include <compat/strl.h>
 #include <string/stdstring.h>
+
+#if defined(_3DS)
+#include <3ds.h>
+#endif
 
 #ifdef HAVE_CONFIG_H
 #include "../config.h"
@@ -46,11 +50,8 @@ static frontend_ctx_driver_t *frontend_ctx_drivers[] = {
 #if defined(__APPLE__) && defined(__MACH__)
    &frontend_ctx_darwin,
 #endif
-#if defined(__linux__)
-   &frontend_ctx_linux,
-#endif
-#if defined(BSD) && !defined(__MACH__)
-   &frontend_ctx_bsd,
+#if defined(__linux__) || (defined(BSD) && !defined(__MACH__))
+   &frontend_ctx_unix,
 #endif
 #if defined(PSP) || defined(VITA)
    &frontend_ctx_psp,
@@ -63,6 +64,9 @@ static frontend_ctx_driver_t *frontend_ctx_drivers[] = {
 #endif
 #ifdef XENON
    &frontend_ctx_xenon,
+#endif
+#ifdef DJGPP
+   &frontend_ctx_dos,
 #endif
    &frontend_ctx_null,
    NULL
@@ -102,16 +106,7 @@ frontend_ctx_driver_t *frontend_ctx_find_driver(const char *ident)
  **/
 frontend_ctx_driver_t *frontend_ctx_init_first(void)
 {
-   unsigned i;
-   frontend_ctx_driver_t *frontend = NULL;
-
-   for (i = 0; frontend_ctx_drivers[i]; i++)
-   {
-      frontend = frontend_ctx_drivers[i];
-      break;
-   }
-
-   return frontend;
+   return frontend_ctx_drivers[0];
 }
 
 bool frontend_driver_get_core_extension(char *s, size_t len)
@@ -149,11 +144,17 @@ bool frontend_driver_get_core_extension(char *s, size_t len)
 #elif defined(GEKKO)
    strlcpy(s, "dol", len);
    return true;
+#elif defined(HW_WUP)
+   strlcpy(s, "rpx|elf", len);
+   return true;
 #elif defined(__linux__)
    strlcpy(s, "elf", len);
    return true;
 #elif defined(_3DS)
-   strlcpy(s, "core", len);
+   if (envIsHomebrew())
+      strlcpy(s, "3dsx", len);
+   else
+      strlcpy(s, "cia", len);
    return true;
 #else
    return false;
@@ -186,6 +187,9 @@ bool frontend_driver_get_salamander_basename(char *s, size_t len)
 #elif defined(HW_RVL)
    strlcpy(s, "boot.dol", len);
    return true;
+#elif defined(HW_WUP)
+   strlcpy(s, "retroarch.rpx", len);
+   return true;
 #elif defined(_3DS)
    strlcpy(s, "retroarch.core", len);
    return true;
@@ -202,13 +206,13 @@ frontend_ctx_driver_t *frontend_get_ptr(void)
    return current_frontend_ctx;
 }
 
-int frontend_driver_parse_drive_list(void *data)
+int frontend_driver_parse_drive_list(void *data, bool load_content)
 {
    frontend_ctx_driver_t *frontend = frontend_get_ptr();
 
    if (!frontend || !frontend->parse_drive_list)
       return -1;
-   return frontend->parse_drive_list(data);
+   return frontend->parse_drive_list(data, load_content);
 }
 
 void frontend_driver_content_loaded(void)
@@ -387,4 +391,29 @@ void frontend_driver_destroy_signal_handler_state(void)
       return;
    frontend->destroy_signal_handler_state();
 }
+
+bool frontend_driver_can_watch_for_changes(void)
+{
+   frontend_ctx_driver_t *frontend = frontend_get_ptr();
+   if (!frontend || !frontend->watch_path_for_changes)
+      return false;
+   return true;
+}
+
+void frontend_driver_watch_path_for_changes(struct string_list *list, int flags, path_change_data_t **change_data)
+{
+   frontend_ctx_driver_t *frontend = frontend_get_ptr();
+   if (!frontend || !frontend->watch_path_for_changes)
+      return;
+   frontend->watch_path_for_changes(list, flags, change_data);
+}
+
+bool frontend_driver_check_for_path_changes(path_change_data_t *change_data)
+{
+   frontend_ctx_driver_t *frontend = frontend_get_ptr();
+   if (!frontend || !frontend->check_for_path_changes)
+      return false;
+   return frontend->check_for_path_changes(change_data);
+}
+
 #endif

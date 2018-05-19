@@ -1,5 +1,5 @@
 /*  RetroArch - A frontend for libretro.
- *  Copyright (C) 2011-2016 - Daniel De Matteis
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -14,7 +14,6 @@
  */
 
 #include "../menu_driver.h"
-#include "../menu_navigation.h"
 #include "../menu_cbs.h"
 
 #ifndef BIND_ACTION_DOWN
@@ -25,17 +24,17 @@
 
 static int action_bind_down_generic(unsigned type, const char *label)
 {
-   size_t scroll_accel   = 0;
+   size_t scroll_accel    = 0;
    unsigned scroll_speed  = 0;
-   if (!menu_navigation_ctl(MENU_NAVIGATION_CTL_GET_SCROLL_ACCEL, &scroll_accel))
+   if (!menu_driver_ctl(MENU_NAVIGATION_CTL_GET_SCROLL_ACCEL, &scroll_accel))
       return -1;
 
-   scroll_speed = (MAX(scroll_accel, 2) - 2) / 4 + 1;
+   scroll_speed = (unsigned)((MAX(scroll_accel, 2) - 2) / 4 + 1);
 
    if (menu_entries_get_size() <= 0)
       return 0;
 
-   menu_navigation_ctl(MENU_NAVIGATION_CTL_INCREMENT, &scroll_speed);
+   menu_driver_ctl(MENU_NAVIGATION_CTL_INCREMENT, &scroll_speed);
 
    return 0;
 }

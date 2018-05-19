@@ -1,6 +1,6 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
- *  Copyright (C) 2011-2016 - Daniel De Matteis
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -22,18 +22,21 @@
 #include <file/file_path.h>
 #include <compat/strl.h>
 #include <compat/posix_string.h>
+#include <string/stdstring.h>
+#include <retro_miscellaneous.h>
 
 #ifdef HAVE_CONFIG_H
 #include "../config.h"
 #endif
 
 #ifdef HAVE_CHEEVOS
-#include "../cheevos.h"
+#include "../cheevos/cheevos.h"
 #endif
 
 #include "cheat_manager.h"
-#include "../configuration.h"
-#include "../runloop.h"
+
+#include "../msg_hash.h"
+#include "../retroarch.h"
 #include "../dynamic.h"
 #include "../core.h"
 #include "../verbosity.h"
@@ -94,7 +97,8 @@ void cheat_manager_apply_cheats(void)
          cheat_info.enabled = true;
          cheat_info.code    = handle->cheats[i].code;
 
-         core_set_cheat(&cheat_info);
+         if (!string_is_empty(cheat_info.code))
+            core_set_cheat(&cheat_info);
       }
    }
     runloop_msg_queue_push(msg_hash_to_str(MSG_APPLYING_CHEAT), 1, 180, true);
@@ -111,8 +115,11 @@ void cheat_manager_set_code(unsigned i, const char *str)
    cheat_manager_t *handle = cheat_manager_state;
    if (!handle)
       return;
-   handle->cheats[i].code  = strdup(str);
-   handle->cheats[i].state = true;
+
+   if (!string_is_empty(str))
+      handle->cheats[i].code  = strdup(str);
+
+   handle->cheats[i].state    = true;
 }
 
 /**
@@ -123,20 +130,18 @@ void cheat_manager_set_code(unsigned i, const char *str)
  *
  * Returns: true (1) if successful, otherwise false (0).
  **/
-bool cheat_manager_save(const char *path)
+bool cheat_manager_save(const char *path, const char *cheat_database)
 {
    bool ret;
    unsigned i;
    char buf[PATH_MAX_LENGTH];
    char cheats_file[PATH_MAX_LENGTH];
    config_file_t *conf               = NULL;
-   settings_t              *settings = config_get_ptr();
    cheat_manager_t *handle           = cheat_manager_state;
 
    buf[0] = cheats_file[0] = '\0';
 
-   fill_pathname_join(buf, settings->path.cheat_database,
-         path, sizeof(buf));
+   fill_pathname_join(buf, cheat_database, path, sizeof(buf));
 
    fill_pathname_noext(cheats_file, buf, ".cht", sizeof(cheats_file));
 
@@ -251,10 +256,10 @@ bool cheat_manager_load(const char *path)
       snprintf(code_key,   sizeof(code_key),   "cheat%u_code",   i);
       snprintf(enable_key, sizeof(enable_key), "cheat%u_enable", i);
 
-      if (config_get_string(conf, desc_key, &tmp))
+      if (config_get_string(conf, desc_key, &tmp) && !string_is_empty(tmp))
          cheat->cheats[i].desc   = strdup(tmp);
 
-      if (config_get_string(conf, code_key, &tmp))
+      if (config_get_string(conf, code_key, &tmp) && !string_is_empty(tmp))
          cheat->cheats[i].code   = strdup(tmp);
 
       if (config_get_bool(conf, enable_key, &tmp_bool))
@@ -359,8 +364,10 @@ void cheat_manager_toggle_index(unsigned i)
    cheat_manager_update(handle, i);
 }
 
-void cheat_manager_toggle(cheat_manager_t *handle)
+void cheat_manager_toggle(void)
 {
+   cheat_manager_t *handle = cheat_manager_state;
+
    if (!handle)
       return;
 
@@ -369,8 +376,10 @@ void cheat_manager_toggle(cheat_manager_t *handle)
    cheat_manager_update(handle, handle->ptr);
 }
 
-void cheat_manager_index_next(cheat_manager_t *handle)
+void cheat_manager_index_next(void)
 {
+   cheat_manager_t *handle = cheat_manager_state;
+
    if (!handle)
       return;
 
@@ -378,8 +387,10 @@ void cheat_manager_index_next(cheat_manager_t *handle)
    cheat_manager_update(handle, handle->ptr);
 }
 
-void cheat_manager_index_prev(cheat_manager_t *handle)
+void cheat_manager_index_prev(void)
 {
+   cheat_manager_t *handle = cheat_manager_state;
+
    if (!handle)
       return;
 
@@ -413,22 +424,6 @@ bool cheat_manager_get_code_state(unsigned i)
    if (!handle)
       return false;
    return handle->cheats[i].state;
-}
-
-void cheat_manager_state_checks(
-      bool cheat_index_plus_pressed,
-      bool cheat_index_minus_pressed,
-      bool cheat_toggle_pressed)
-{
-   cheat_manager_t *handle = cheat_manager_state;
-   if (!handle)
-      return;
-   if (cheat_index_plus_pressed)
-      cheat_manager_index_next(handle);
-   else if (cheat_index_minus_pressed)
-      cheat_manager_index_prev(handle);
-   else if (cheat_toggle_pressed)
-      cheat_manager_toggle(handle);
 }
 
 void cheat_manager_state_free(void)

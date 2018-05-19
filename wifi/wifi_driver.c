@@ -1,8 +1,8 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
- *  Copyright (C) 2011-2016 - Daniel De Matteis
- *  Copyright (C) 2014-2016 - Jean-André Santoni
- * 
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
+ *  Copyright (C) 2014-2017 - Jean-André Santoni
+ *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
  *  ation, either version 3 of the License, or (at your option) any later version.
@@ -26,7 +26,6 @@
 #include "../configuration.h"
 #include "../driver.h"
 #include "../retroarch.h"
-#include "../runloop.h"
 #include "../list_special.h"
 #include "../verbosity.h"
 
@@ -138,7 +137,7 @@ bool wifi_driver_ctl(enum rarch_wifi_ctl_state state, void *data)
       case RARCH_WIFI_CTL_OWNS_DRIVER:
          return wifi_driver_data_own;
       case RARCH_WIFI_CTL_SET_ACTIVE:
-         wifi_driver_active = true; 
+         wifi_driver_active = true;
          break;
       case RARCH_WIFI_CTL_FIND_DRIVER:
          {
@@ -146,24 +145,27 @@ bool wifi_driver_ctl(enum rarch_wifi_ctl_state state, void *data)
             driver_ctx_info_t drv;
 
             drv.label = "wifi_driver";
-            drv.s     = settings->wifi.driver;
+            drv.s     = settings->arrays.wifi_driver;
 
             driver_ctl(RARCH_DRIVER_CTL_FIND_INDEX, &drv);
 
-            i = drv.len;
+            i = (int)drv.len;
 
             if (i >= 0)
                wifi_driver = (const wifi_driver_t*)wifi_driver_find_handle(i);
             else
             {
-               unsigned d;
-               RARCH_ERR("Couldn't find any wifi driver named \"%s\"\n",
-                     settings->wifi.driver);
-               RARCH_LOG_OUTPUT("Available wifi drivers are:\n");
-               for (d = 0; wifi_driver_find_handle(d); d++)
-                  RARCH_LOG_OUTPUT("\t%s\n", wifi_driver_find_ident(d));
+               if (verbosity_is_enabled())
+               {
+                  unsigned d;
+                  RARCH_ERR("Couldn't find any wifi driver named \"%s\"\n",
+                        settings->arrays.wifi_driver);
+                  RARCH_LOG_OUTPUT("Available wifi drivers are:\n");
+                  for (d = 0; wifi_driver_find_handle(d); d++)
+                     RARCH_LOG_OUTPUT("\t%s\n", wifi_driver_find_ident(d));
 
-               RARCH_WARN("Going to default to first wifi driver...\n");
+                  RARCH_WARN("Going to default to first wifi driver...\n");
+               }
 
                wifi_driver = (const wifi_driver_t*)wifi_driver_find_handle(0);
 
@@ -173,10 +175,10 @@ bool wifi_driver_ctl(enum rarch_wifi_ctl_state state, void *data)
          }
          break;
       case RARCH_WIFI_CTL_UNSET_ACTIVE:
-         wifi_driver_active = false; 
+         wifi_driver_active = false;
          break;
       case RARCH_WIFI_CTL_IS_ACTIVE:
-        return wifi_driver_active; 
+        return wifi_driver_active;
       case RARCH_WIFI_CTL_DEINIT:
         if (wifi_data && wifi_driver)
         {
@@ -187,15 +189,15 @@ bool wifi_driver_ctl(enum rarch_wifi_ctl_state state, void *data)
         wifi_data = NULL;
         break;
       case RARCH_WIFI_CTL_STOP:
-        if (     wifi_driver 
-              && wifi_driver->stop 
+        if (     wifi_driver
+              && wifi_driver->stop
               && wifi_data)
            wifi_driver->stop(wifi_data);
         break;
       case RARCH_WIFI_CTL_START:
         if (wifi_driver && wifi_data && wifi_driver->start)
         {
-           if (settings->wifi.allow)
+           if (settings->bools.wifi_allow)
               return wifi_driver->start(wifi_data);
         }
         return false;
@@ -227,6 +229,6 @@ bool wifi_driver_ctl(enum rarch_wifi_ctl_state state, void *data)
       default:
          break;
    }
-   
+
    return false;
 }

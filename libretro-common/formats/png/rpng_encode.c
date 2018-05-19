@@ -1,4 +1,4 @@
-/* Copyright  (C) 2010-2016 The RetroArch team
+/* Copyright  (C) 2010-2018 The RetroArch team
  *
  * ---------------------------------------------------------------------------------------
  * The following license statement only applies to this file (rpng_encode.c).
@@ -26,7 +26,7 @@
 
 #include <encodings/crc32.h>
 #include <streams/file_stream.h>
-#include <file/archive_file.h>
+#include <streams/trans_stream.h>
 
 #include "rpng_internal.h"
 
@@ -57,7 +57,7 @@ static bool png_write_crc(RFILE *file, const uint8_t *data, size_t size)
 static bool png_write_ihdr(RFILE *file, const struct png_ihdr *ihdr)
 {
    uint8_t ihdr_raw[21];
-   
+
    ihdr_raw[0]  = '0';                 /* Size */
    ihdr_raw[1]  = '0';
    ihdr_raw[2]  = '0';
@@ -213,7 +213,7 @@ static bool rpng_save_image(const char *path,
    bool ret = true;
    struct png_ihdr ihdr = {0};
 
-   const struct file_archive_file_backend *stream_backend = NULL;
+   const struct trans_stream_backend *stream_backend = NULL;
    size_t encode_buf_size  = 0;
    uint8_t *encode_buf     = NULL;
    uint8_t *deflate_buf    = NULL;
@@ -225,11 +225,15 @@ static bool rpng_save_image(const char *path,
    uint8_t *prev_encoded   = NULL;
    uint8_t *encode_target  = NULL;
    void *stream            = NULL;
-   RFILE *file             = filestream_open(path, RFILE_MODE_WRITE, -1);
+   uint32_t total_in       = 0;
+   uint32_t total_out      = 0;
+   RFILE *file             = filestream_open(path,
+         RETRO_VFS_FILE_ACCESS_WRITE,
+         RETRO_VFS_FILE_ACCESS_HINT_NONE);
    if (!file)
       GOTO_END_ERROR();
 
-   stream_backend = file_archive_get_zlib_file_backend();
+   stream_backend = trans_stream_get_zlib_deflate_backend();
 
    if (filestream_write(file, png_magic, sizeof(png_magic)) != sizeof(png_magic))
       GOTO_END_ERROR();
@@ -270,7 +274,7 @@ static bool rpng_save_image(const char *path,
       /* Try every filtering method, and choose the method
        * which has most entries as zero.
        *
-       * This is probably not very optimal, but it's very 
+       * This is probably not very optimal, but it's very
        * simple to implement.
        */
       {
@@ -309,7 +313,6 @@ static bool rpng_save_image(const char *path,
          {
             filter = 4;
             chosen_filtered = paeth_filtered;
-            min_sad = paeth_score;
          }
 
          *encode_target++ = filter;
@@ -328,33 +331,31 @@ static bool rpng_save_image(const char *path,
    if (!stream)
       GOTO_END_ERROR();
 
-   stream_backend->stream_set(
+   stream_backend->set_in(
          stream,
-         encode_buf_size,
-         encode_buf_size * 2,
          encode_buf,
-         deflate_buf + 8);
+         (unsigned)encode_buf_size);
+   stream_backend->set_out(
+         stream,
+         deflate_buf + 8,
+         (unsigned)(encode_buf_size * 2));
 
-   stream_backend->stream_compress_init(stream, 9);
-
-   if (stream_backend->stream_compress_data_to_file(stream) != 1)
+   if (!stream_backend->trans(stream, true, &total_in, &total_out, NULL))
    {
-      stream_backend->stream_compress_free(stream);
       GOTO_END_ERROR();
    }
 
-   stream_backend->stream_compress_free(stream);
-
    memcpy(deflate_buf + 4, "IDAT", 4);
-   dword_write_be(deflate_buf + 0,        ((uint32_t)stream_backend->stream_get_total_out(stream)));
-   if (!png_write_idat(file, deflate_buf, ((size_t)stream_backend->stream_get_total_out(stream) + 8)))
+   dword_write_be(deflate_buf + 0,        ((uint32_t)total_out));
+   if (!png_write_idat(file, deflate_buf, ((size_t)total_out + 8)))
       GOTO_END_ERROR();
 
    if (!png_write_iend(file))
       GOTO_END_ERROR();
 
 end:
-   filestream_close(file);
+   if (file)
+      filestream_close(file);
    free(encode_buf);
    free(deflate_buf);
    free(rgba_line);

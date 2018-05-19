@@ -1,5 +1,5 @@
 /* RetroArch - A frontend for libretro.
- *  Copyright (C) 2011-2016 - Daniel De Matteis
+ *  Copyright (C) 2011-2017 - Daniel De Matteis
  *
  * RetroArch is free software: you can redistribute it and/or modify it under the terms
  * of the GNU General Public License as published by the Free Software Found-
@@ -30,7 +30,7 @@ static bool ui_browser_window_cocoa_open(ui_browser_window_state_t *state)
    NSOpenPanel* panel    = (NSOpenPanel*)[NSOpenPanel openPanel];
     NSArray *filetypes    = NULL;
     
-    if (state->filters && !string_is_empty(state->filters))
+    if (!string_is_empty(state->filters))
         filetypes = [[NSArray alloc] initWithObjects:BOXSTRING(state->filters), BOXSTRING(state->filters_title), nil];
    [panel setAllowedFileTypes:filetypes];
 #if defined(MAC_OS_X_VERSION_10_6)
@@ -60,7 +60,7 @@ static bool ui_browser_window_cocoa_save(ui_browser_window_state_t *state)
    return false;
 }
 
-const ui_browser_window_t ui_browser_window_cocoa = {
+ui_browser_window_t ui_browser_window_cocoa = {
    ui_browser_window_cocoa_open,
    ui_browser_window_cocoa_save,
    "cocoa"

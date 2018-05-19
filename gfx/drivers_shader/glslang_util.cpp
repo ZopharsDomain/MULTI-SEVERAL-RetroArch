@@ -1,5 +1,5 @@
 /*  RetroArch - A frontend for libretro.
- *  Copyright (C) 2010-2016 - Hans-Kristian Arntzen
+ *  Copyright (C) 2010-2017 - Hans-Kristian Arntzen
  * 
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -25,21 +25,26 @@
 #include <lists/string_list.h>
 #include <string/stdstring.h>
 
-#include "glslang_util.hpp"
-#include "glslang.hpp"
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#endif
 
+#include "glslang_util.h"
+#if defined(HAVE_GLSLANG)
+#include <glslang.hpp>
+#endif
 #include "../../verbosity.h"
 
 using namespace std;
 
-static bool read_shader_file(const char *path, vector<string> *output, bool root_file)
+bool glslang_read_shader_file(const char *path, vector<string> *output, bool root_file)
 {
    vector<const char *> lines;
    char include_path[PATH_MAX_LENGTH];
    char tmp[PATH_MAX_LENGTH];
    char                          *ptr = NULL;
    char                          *buf = nullptr;
-   ssize_t                        len = 0;
+   int64_t                        len = 0;
    const char *basename               = path_basename(path);
 
    include_path[0] = tmp[0] = '\0';
@@ -55,9 +60,12 @@ static bool read_shader_file(const char *path, vector<string> *output, bool root
 
    while (ptr && *ptr)
    {
+      char *next_ptr = NULL;
+
       lines.push_back(ptr);
 
-      char *next_ptr = strchr(ptr, '\n');
+      next_ptr = strchr(ptr, '\n');
+
       if (next_ptr)
       {
          ptr = next_ptr + 1;
@@ -68,10 +76,7 @@ static bool read_shader_file(const char *path, vector<string> *output, bool root
    }
 
    if (lines.empty())
-   {
-      free(buf);
-      return false;
-   }
+      goto error;
 
    if (root_file)
    {
@@ -104,9 +109,9 @@ static bool read_shader_file(const char *path, vector<string> *output, bool root
          if (!c)
          {
             RARCH_ERR("Invalid include statement \"%s\".\n", line);
-            free(buf);
-            return false;
+            goto error;
          }
+
          c++;
 
          closing = (char*)strchr(c, '"');
@@ -114,19 +119,15 @@ static bool read_shader_file(const char *path, vector<string> *output, bool root
          if (!closing)
          {
             RARCH_ERR("Invalid include statement \"%s\".\n", line);
-            free(buf);
-            return false;
+            goto error;
          }
 
          *closing = '\0';
 
          fill_pathname_resolve_relative(include_path, path, c, sizeof(include_path));
 
-         if (!read_shader_file(include_path, output, false))
-         {
-            free(buf);
-            return false;
-         }
+         if (!glslang_read_shader_file(include_path, output, false))
+            goto error;
 
          /* After including a file, use line directive 
           * to pull it back to current file. */
@@ -150,6 +151,10 @@ static bool read_shader_file(const char *path, vector<string> *output, bool root
 
    free(buf);
    return true;
+
+error:
+   free(buf);
+   return false;
 }
 
 static string build_stage_source(const vector<string> &lines, const char *stage)
@@ -268,24 +273,29 @@ static glslang_format glslang_find_format(const char *fmt)
    return SLANG_FORMAT_UNKNOWN;
 }
 
-static bool glslang_parse_meta(const vector<string> &lines, glslang_meta *meta)
+bool glslang_parse_meta(const vector<string> &lines, glslang_meta *meta)
 {
-   char id[64]   = {};
-   char desc[64] = {};
+   char id[64];
+   char desc[64];
 
-   *meta = glslang_meta{};
+   id[0] = desc[0] = '\0';
+
+   *meta           = glslang_meta{};
 
    for (auto &line : lines)
    {
       if (line.find("#pragma name ") == 0)
       {
+         const char *str = NULL;
+
          if (!meta->name.empty())
          {
             RARCH_ERR("[slang]: Trying to declare multiple names for file.\n");
             return false;
          }
 
-         const char *str = line.c_str() + strlen("#pragma name ");
+         str = line.c_str() + strlen("#pragma name ");
+
          while (*str == ' ')
             str++;
          meta->name = str;
@@ -299,7 +309,7 @@ static bool glslang_parse_meta(const vector<string> &lines, glslang_meta *meta)
          if (ret == 5)
          {
             step = 0.1f * (maximum - minimum);
-            ret = 6;
+            ret  = 6;
          }
 
          if (ret == 6)
@@ -312,11 +322,12 @@ static bool glslang_parse_meta(const vector<string> &lines, glslang_meta *meta)
              * if they are exactly the same. */
             if (itr != end(meta->parameters))
             {
-               if (   itr->desc != desc    ||
-                   itr->initial != initial ||
-                   itr->minimum != minimum ||
-                   itr->maximum != maximum ||
-                   itr->step != step)
+               if (   itr->desc    != desc    ||
+                      itr->initial != initial ||
+                      itr->minimum != minimum ||
+                      itr->maximum != maximum ||
+                      itr->step    != step
+                  )
                {
                   RARCH_ERR("[slang]: Duplicate parameters found for \"%s\", but arguments do not match.\n", id);
                   return false;
@@ -357,25 +368,28 @@ static bool glslang_parse_meta(const vector<string> &lines, glslang_meta *meta)
    return true;
 }
 
+
+#if defined(HAVE_GLSLANG)
 bool glslang_compile_shader(const char *shader_path, glslang_output *output)
 {
    vector<string> lines;
 
    RARCH_LOG("[slang]: Compiling shader \"%s\".\n", shader_path);
-   if (!read_shader_file(shader_path, &lines, true))
+
+   if (!glslang_read_shader_file(shader_path, &lines, true))
       return false;
 
    if (!glslang_parse_meta(lines, &output->meta))
       return false;
 
-   if (!glslang::compile_spirv(build_stage_source(lines, "vertex"),
+   if (    !glslang::compile_spirv(build_stage_source(lines, "vertex"),
             glslang::StageVertex, &output->vertex))
    {
       RARCH_ERR("Failed to compile vertex shader stage.\n");
       return false;
    }
 
-   if (!glslang::compile_spirv(build_stage_source(lines, "fragment"),
+   if (    !glslang::compile_spirv(build_stage_source(lines, "fragment"),
             glslang::StageFragment, &output->fragment))
    {
       RARCH_ERR("Failed to compile fragment shader stage.\n");
@@ -384,4 +398,9 @@ bool glslang_compile_shader(const char *shader_path, glslang_output *output)
 
    return true;
 }
-
+#else
+bool glslang_compile_shader(const char *shader_path, glslang_output *output)
+{
+   return false;
+}
+#endif
